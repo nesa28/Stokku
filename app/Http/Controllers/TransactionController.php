@@ -2,168 +2,302 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Products;
 use App\Models\Transaction;
-use App\Models\User;
-use Illuminate\Support\Facades\Auth; // Untuk mendapatkan user yang sedang login
-use Illuminate\View\View;
-use Illuminate\Http\RedirectResponse; // Digunakan untuk method yang mengembalikan redirect
+use App\Models\TransactionDetail;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class TransactionController extends Controller
 {
-   // Index - Menampilkan semua data
-    public function index(): View
-    {
-        $restocks = Transaction::with(['product', 'user'])->latest()->paginate(10); // Memuat relasi 'product' dan 'user' untuk ditampilkan
-        return view('transaction.index', compact('transaction'));
-    }
-
-    // Create - Menampilkan form tambah data
-    public function create(): View
-    {
-        $products = Products::all(); // Ambil semua produk untuk dropdown di form
-        $users = User::all();
-        return view('transaction.create', compact('products', 'users'));
-    }
-
     // Store - Menyimpan data baru
     public function store(Request $request)
     {
-        $request->validate([
-            'product_id' =>'required|exists:products,id', // product_id harus ada di tabel products
-            'jumlah'=>'required',
-            'harga'=>'required',
-            'tanggal_transaksi'=>'required|date',
-            'pelanggan'=>'nullable',
-            'user_id'=>'nullable|exists:users,id',// user_id harus ada di tabel users
-        ]);
+        try {
+            // Validasi input untuk membuat transaksi baru
+            $request->validate([
+                'tanggal_transaksi' => 'required|date',
+                'pelanggan' => 'nullable|string|max:255',
+                'products' => 'required|array|min:1',
+                'products.*.product_id' => 'required|exists:products,id',
+                'products.*.jumlah' => 'required|integer|min:1',
+                'products.*.jenis_penjualan' => 'required|in:satuan,eceran', // Validasi jenis penjualan
+            ]);
 
-        // Hitung total harga beli jika harga_beli ada
-        $total_transaksi = null;
-        if ($request->filled('harga') && $request->filled('jumlah')) {
-            $total_transaksi = $request->harga * $request->jumlah;
+            DB::beginTransaction();
+
+            $totalTransaksiKeseluruhan = 0;
+            $transactionDetailsData = [];
+
+            $productIds = collect($request->products)->pluck('product_id')->unique();
+            // Gunakan Products::class
+            $products = Products::whereIn('id', $productIds)->lockForUpdate()->get()->keyBy('id');
+
+            foreach ($request->products as $item) {
+                $product = $products->get($item['product_id']);
+
+                if (!$product) {
+                    throw ValidationException::withMessages([
+                        'products.*.product_id' => "Produk dengan ID {$item['product_id']} tidak ditemukan."
+                    ]);
+                }
+
+                $kuantitasDijual = $item['jumlah'];
+                $jenisPenjualan = $item['jenis_penjualan'];
+                $hargaPerUnitFinal = 0;
+                $stokYangDikurangi = 0; // Berapa yang harus dikurangi dari kolom 'stok' di tabel products
+
+                // Penentuan Harga dan Pengurangan Stok
+                if ($jenisPenjualan === 'satuan') {
+                    $hargaPerUnitFinal = $product->harga_satuan;
+                    $stokYangDikurangi = $kuantitasDijual;
+                } elseif ($jenisPenjualan === 'eceran') {
+                    // Gunakan 'bisa_atau_tdk_diecer'
+                    if (!$product->bisa_atau_tdk_diecer || $product->unit_eceran <= 0) {
+                        throw ValidationException::withMessages([
+                            'products.*.jenis_penjualan' => "Produk '{$product->nama_produk}' tidak bisa dijual eceran."
+                        ]);
+                    }
+                    $hargaPerUnitFinal = $product->harga_eceran_per_unit;
+                    $stokYangDikurangi = $kuantitasDijual / $product->unit_eceran;
+                } else {
+                    throw ValidationException::withMessages([
+                        'products.*.jenis_penjualan' => "Jenis penjualan tidak valid untuk produk '{$product->nama_produk}'."
+                    ]);
+                }
+
+                // Cek stok sebelum mengurangi
+                if ($product->stok < $stokYangDikurangi) {
+                    throw ValidationException::withMessages([
+                        'products.*.jumlah' => "Stok tidak cukup untuk produk: {$product->nama_produk}. Stok tersedia: {$product->stok} (satuan)."
+                    ]);
+                }
+
+                $subtotal = $hargaPerUnitFinal * $kuantitasDijual;
+                $totalTransaksiKeseluruhan += $subtotal;
+
+                $transactionDetailsData[] = [
+                    'product_id' => $item['product_id'],
+                    'jumlah' => $kuantitasDijual,
+                    'jenis_penjualan' => $jenisPenjualan,
+                    'harga_per_unit' => $hargaPerUnitFinal,
+                    'subtotal' => $subtotal,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+
+                // Kurangi stok produk secara langsung
+                $product->decrement('stok', $stokYangDikurangi);
+            }
+
+            $transaction = Transaction::create([
+                'total_transaksi' => $totalTransaksiKeseluruhan,
+                'tanggal_transaksi' => $request->tanggal_transaksi,
+                'pelanggan' => $request->pelanggan,
+                'user_id' => auth()->id(),
+            ]);
+
+            $transaction->details()->createMany($transactionDetailsData);
+
+            DB::commit();
+
+            return response()->json(['message' => 'Transaksi berhasil dicatat!', 'transaction' => $transaction->load('details.product')], 201);
+
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Gagal mencatat transaksi: ' . $e->getMessage()], 500);
         }
-
-       // Buat record transaction baru di database
-        $transaction = Transaction::create([
-            'product_id' => $request->product_id,
-            'jumlah' => $request->jumlah,
-            'harga' => $request->harga, // ambil dari database
-            'total_transaksi' => $total_transaksi, // Simpan hasil perhitungan
-            'tanggal_transaksi' => $request->tanggal_transaksi,
-            'supplier' => $request->supplier,
-            'user_id' => $request->user_id ?? Auth::id(), // Jika user_id tidak diisi, pakai user yang login
-        ]);
-
-        //Perbarui stok produk setelah transaction
-        $product = Products::find($request->product_id);
-        if ($product) {
-            $product->stok += $request->jumlah;
-            $product->save();
-        }
-
-        return redirect()->route('transaction')
-            ->with('success', 'Riwayat transaction berhasil ditambahkan!');
     }
 
-    //Menampilkan detail riwayat transaction tertentu.
-     public function show(Transaction $transaction): View
+    //Show - Menampilkan detail.
+    public function show(Transaction $transaction)
     {
-        return view('transaction.show', compact('transaction'));
-    }
-
-    // Edit - Menampilkan form edit
-    public function edit($id): View
-    {
-        // Ambil semua produk dan user untuk dropdown di form edit
-        $products = Products::all();
-        $users = User::all();
-        $transaction = Transaction::find($id);
-        return view('transaction.edit', compact('transaction'));
+        return response()->json($transaction->load('details.product'));
     }
 
     // Update - Memperbarui data
-    public function update(Request $request,Transaction $transaction): RedirectResponse
+    public function update(Request $request, Transaction $transaction)
     {
-        // Simpan jumlah lama sebelum update untuk perhitungan stok
-        $oldJmlh = $transaction->jumlah;
-        $oldProductId = $transaction->product_id;
+        try {
+            $request->validate([
+                'tanggal_transaksi' => 'required|date',
+                'pelanggan' => 'nullable|string|max:255',
+                'products' => 'required|array',
+                'products.*.id' => 'nullable|exists:transaction_details,id',
+                'products.*.product_id' => 'required|exists:products,id',
+                'products.*.jumlah' => 'required|integer|min:1',
+                'products.*.jenis_penjualan' => 'required|in:satuan,eceran',
+            ]);
 
-        $request->validate([
-           'product_id' =>'required|exists:products,id',
-            'jumlah'=>'required',
-            'harga'=>'required',
-            'tanggal_transaksi'=>'required|date',
-            'pelanggan'=>'nullable',
-            'user_id'=>'nullable|exists:users,id',
-        ]);
+            DB::beginTransaction();
 
-        // Hitung total harga beli jika harga_beli ada
-        $total_transaksi = null;
-        if ($request->filled('harga') && $request->filled('jumlah')) {
-            $total_transaksi = $request->harga * $request->jumlah;
+            $totalTransaksiKeseluruhan = 0;
+            $updatedDetailIds = [];
+
+            $productIdsInRequest = collect($request->products)->pluck('product_id')->unique();
+            $productsFromDb = Products::whereIn('id', $productIdsInRequest)->lockForUpdate()->get()->keyBy('id');
+
+            $existingDetails = $transaction->details->keyBy('id');
+
+            foreach ($request->products as $item) {
+                $product = $productsFromDb->get($item['product_id']);
+
+                if (!$product) {
+                    throw ValidationException::withMessages([
+                        'products.*.product_id' => "Produk dengan ID {$item['product_id']} tidak ditemukan."
+                    ]);
+                }
+
+                $kuantitasDijualBaru = $item['jumlah'];
+                $jenisPenjualanBaru = $item['jenis_penjualan'];
+                $hargaPerUnitFinalBaru = 0;
+                $stokYangDikurangiBaru = 0;
+
+                // Penentuan Harga dan Pengurangan Stok untuk item BARU/DIUBAH
+                if ($jenisPenjualanBaru === 'satuan') {
+                    $hargaPerUnitFinalBaru = $product->harga_satuan;
+                    $stokYangDikurangiBaru = $kuantitasDijualBaru;
+                } elseif ($jenisPenjualanBaru === 'eceran') {
+                    if (!$product->bisa_atau_tdk_diecer || $product->unit_eceran <= 0) {
+                        throw ValidationException::withMessages([
+                            'products.*.jenis_penjualan' => "Produk '{$product->nama_produk}' tidak bisa dijual eceran."
+                        ]);
+                    }
+                    $hargaPerUnitFinalBaru = $product->harga_eceran_per_unit;
+                    $stokYangDikurangiBaru = $kuantitasDijualBaru / $product->unit_eceran;
+                }
+
+                $subtotalItemBaru = $hargaPerUnitFinalBaru * $kuantitasDijualBaru;
+                $totalTransaksiKeseluruhan += $subtotalItemBaru;
+
+                $detailId = $item['id'] ?? null;
+                $existingDetail = $existingDetails->get($detailId);
+
+                if ($existingDetail) {
+                    // Update item yang sudah ada
+                    $stokYangDikembalikan = 0;
+
+                    // Hitung berapa stok satuan yang terpakai oleh detail yang lama
+                    //Products::find() untuk memastikan mengambil data produk yang benar sesuai detail lama
+                    $productLama = Products::find($existingDetail->product_id);
+                    if ($productLama) { // Pastikan produk lama masih ada
+                        if ($existingDetail->jenis_penjualan === 'satuan') {
+                            $stokYangDikembalikan = $existingDetail->jumlah;
+                        } elseif ($existingDetail->jenis_penjualan === 'eceran' && $productLama->unit_eceran > 0) {
+                            $stokYangDikembalikan = $existingDetail->jumlah / $productLama->unit_eceran;
+                        }
+                    }
+
+                    // Kembalikan stok lama sebelum menghitung stok baru
+                    $product->increment('stok', $stokYangDikembalikan);
+
+                    // Cek stok baru
+                    if ($product->stok < $stokYangDikurangiBaru) {
+                        throw ValidationException::withMessages([
+                            'products.*.jumlah' => "Stok tidak cukup untuk update produk '{$product->nama_produk}'. Stok tersedia: {$product->stok} (satuan)."
+                        ]);
+                    }
+                    $product->decrement('stok', $stokYangDikurangiBaru);
+
+                    $existingDetail->update([
+                        'product_id' => $item['product_id'],
+                        'jumlah' => $kuantitasDijualBaru,
+                        'jenis_penjualan' => $jenisPenjualanBaru,
+                        'harga_per_unit' => $hargaPerUnitFinalBaru,
+                        'subtotal' => $subtotalItemBaru,
+                    ]);
+                    $updatedDetailIds[] = $existingDetail->id;
+
+                } else {
+                    // Tambah item baru
+                    if ($product->stok < $stokYangDikurangiBaru) {
+                        throw ValidationException::withMessages([
+                            'products.*.jumlah' => "Stok tidak cukup untuk produk baru '{$product->nama_produk}'. Stok tersedia: {$product->stok} (satuan)."
+                        ]);
+                    }
+                    $product->decrement('stok', $stokYangDikurangiBaru);
+
+                    $newDetail = $transaction->details()->create([
+                        'product_id' => $item['product_id'],
+                        'jumlah' => $kuantitasDijualBaru,
+                        'jenis_penjualan' => $jenisPenjualanBaru,
+                        'harga_per_unit' => $hargaPerUnitFinalBaru,
+                        'subtotal' => $subtotalItemBaru,
+                    ]);
+                    $updatedDetailIds[] = $newDetail->id;
+                }
+            }
+
+            // Hapus detail yang tidak ada lagi di request dan kembalikan stok
+            $detailsToDelete = $existingDetails->whereNotIn('id', $updatedDetailIds);
+            foreach ($detailsToDelete as $detail) {
+
+                $product = Products::find($detail->product_id);
+                if ($product) {
+                    $stokYangDikembalikan = 0;
+                    if ($detail->jenis_penjualan === 'satuan') {
+                        $stokYangDikembalikan = $detail->jumlah;
+                    } elseif ($detail->jenis_penjualan === 'eceran' && $product->unit_eceran > 0) {
+                        $stokYangDikembalikan = $detail->jumlah / $product->unit_eceran;
+                    }
+                    $product->increment('stok', $stokYangDikembalikan);
+                }
+                $detail->delete();
+            }
+
+            // Update total transaksi utama
+            $transaction->update([
+                'total_transaksi' => $totalTransaksiKeseluruhan,
+                'tanggal_transaksi' => $request->tanggal_transaksi,
+                'pelanggan' => $request->pelanggan,
+            ]);
+
+            DB::commit();
+
+            return response()->json(['message' => 'Transaksi berhasil diperbarui!', 'transaction' => $transaction->load('details.product')], 200);
+
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Gagal memperbarui transaksi: ' . $e->getMessage()], 500);
         }
-
-        $update = [
-            'product_id' => $request->product_id,
-            'jumlah' => $request->jumlah,
-            'harga' => $request->harga, // ambil dari database
-            'total_transaksi' => $total_transaksi, // Simpan hasil perhitungan
-            'tanggal_transaksi' => $request->tanggal_transaksi,
-            'supplier' => $request->supplier,
-            'user_id' => $request->user_id ?? Auth::id(),
-        ];
-
-         // Perbarui stok produk setelah update
-        $newJmlh = $request->jumlah;
-        $newProductId = $request->product_id;
-
-        // menyesuaikan stok jika produk_id berubah atau jumlahnya
-        if ($oldProductId !== $newProductId) {
-            // Kurangi stok dari produk lama
-            $oldProduct = Products::find($oldProductId);
-            if ($oldProduct) {
-                $oldProduct->stok -= $oldJmlh;
-                $oldProduct->save();
-            }
-            // Tambahkan stok ke produk baru
-            $newProduct = Products::find($newProductId);
-            if ($newProduct) {
-                $newProduct->stok += $newJmlh;
-                $newProduct->save();
-            }
-        } else {
-            // Jika product_id sama, sesuaikan stok berdasarkan perubahan jumlah
-            $product = Products::find($newProductId);
-            if ($product) {
-                $stokDiff = $newJmlh - $oldJmlh; // Hitung perbedaan jumlah
-                $product->stok += $stokDiff;
-                $product->save();
-            }
-        }
-
-        return redirect()->route('transaction')
-            ->with('success', 'Riwayat transaction berhasil diupdate!');
     }
 
     // Destroy - Menghapus data
-    public function destroy($transaction): RedirectResponse
+    public function destroy(Transaction $transaction)
     {
-         // Kurangi stok produk saat restock dihapus
-        $product = Products::find($transaction->product_id);
-        if ($product) {
-            $product->stok -= $transaction->jumlah;
-            // Pastikan stok tidak menjadi negatif
-            if ($product->stok < 0) {
-                $product->stok = 0;
-            }
-            $product->save();
-        }
+        try {
+            DB::beginTransaction();
 
-        $transaction->delete();
-        return redirect()->route('transaction')
-            ->with('success', 'riwayat transaction berhasil dihapus');
+            // Sebelum menghapus transaksi dan detailnya, kembalikan stok produk
+            foreach ($transaction->details as $detail) {
+
+                $product = Products::find($detail->product_id);
+                if ($product) {
+                    $stokYangDikembalikan = 0;
+                    if ($detail->jenis_penjualan === 'satuan') {
+                        $stokYangDikembalikan = $detail->jumlah;
+                    } elseif ($detail->jenis_penjualan === 'eceran' && $product->unit_eceran > 0) {
+                        $stokYangDikembalikan = $detail->jumlah / $product->unit_eceran;
+                    }
+                    $product->increment('stok', $stokYangDikembalikan);
+                }
+            }
+
+            $transaction->delete();
+
+            DB::commit();
+            return response()->json(['message' => 'Transaksi berhasil dihapus dan stok dikembalikan!'], 200);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Gagal menghapus transaksi: ' . $e->getMessage()], 500);
+        }
     }
 }
-

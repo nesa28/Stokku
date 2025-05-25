@@ -29,18 +29,19 @@ class Products extends Model
         'harga_eceran_per_unit' => 'decimal:2', // Casting untuk harga dengan 2 desimal
     ];
 
-    // mendefinisikan hubungan (relationship) satu ke banyak(hasMany)
-    public function transactions(): HasMany
+    // Hubungan (relationship) dengan detail transaksi (satu produk bisa ada di banyak detail transaksi)
+    public function transactionDetails(): HasMany
     {
-        return $this->hasMany(Transaction::class, 'product_id', 'id');
-        // 'Transaction::class' adalah nama model Transaction
-        // 'product_id' adalah nama foreign key di tabel 'transaction'
+        return $this->hasMany(TransactionDetail::class, 'product_id', 'id');
+        // 'TransactionDetail::class' adalah model untuk detail transaksi
+        // 'product_id' adalah foreign key di tabel 'transaction_details'
         // 'id' adalah primary key di tabel 'products'
     }
 
-    public function Restock(): HasMany
+    // Hubungan (relationship) dengan detail restock (satu produk bisa ada di banyak detail restock)
+    public function restockDetails(): HasMany 
     {
-        return $this->hasMany(Restock::class, 'product_id', 'id');
-        // 'Restock::class' adalah nama model Transaction
+        return $this->hasMany(RestockDetail::class, 'product_id', 'id');
+        // 'RestockDetail::class' adalah model untuk detail restock
     }
 }

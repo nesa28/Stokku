@@ -12,7 +12,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany; // Import HasMany untuk rela
 
 class User extends Authenticatable implements MustVerifyEmail
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory, Notifiable, HasApiTokens;
 
     /**

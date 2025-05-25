@@ -5,165 +5,266 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Products;
 use App\Models\Restock;
+use App\Models\RestockDetail;
 use App\Models\User;
-use Illuminate\Support\Facades\Auth; // Untuk mendapatkan user yang sedang login
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB; // Untuk transaksi database
+use Illuminate\Validation\ValidationException; // Untuk penanganan validasi
 use Illuminate\View\View;
-use Illuminate\Http\RedirectResponse; // Digunakan untuk method yang mengembalikan redirect
+use Illuminate\Http\RedirectResponse;
 
 class RestockController extends Controller
 {
-   // Index - Menampilkan semua data
+    // Index - Menampilkan semua data restock utama dengan detailnya
     public function index(): View
     {
-        $restocks = Restock::with(['product', 'user'])->latest()->paginate(10); // Memuat relasi 'product' dan 'user' untuk ditampilkan
+        $restocks = Restock::with(['user', 'details.product'])->latest()->paginate(10);
         return view('restocks.index', compact('restocks'));
     }
 
     // Create - Menampilkan form tambah data
     public function create(): View
     {
-        $products = Products::all(); // Ambil semua produk untuk dropdown di form
-        $users = User::all();
-        return view('restock.create', compact('products', 'users'));
+        $products = Products::all(); // Ambil semua produk
+        return view('restocks.create', compact('products'));
     }
 
-    // Store - Menyimpan data baru
+    // Store - Menyimpan data restock baru (bisa banyak produk)
     public function store(Request $request)
     {
-        $request->validate([
-            'product_id' =>'required|exists:products,id', // product_id harus ada di tabel products
-            'jumlah'=>'required',
-            'harga_beli'=>'required',
-            'tanggal_restock'=>'required|date',
-            'supplier'=>'nullable',
-            'user_id'=>'nullable|exists:users,id',// user_id harus ada di tabel users
-        ]);
+        try {
+            $request->validate([
+                'tanggal_restock' => 'required|date',
+                'supplier' => 'nullable|string|max:255',
+                'products' => 'required|array|min:1', // Harus ada setidaknya satu produk
+                'products.*.product_id' => 'required|exists:products,id',
+                'products.*.jumlah' => 'required|integer|min:1',
+                'products.*.harga_beli_per_unit' => 'required|numeric|min:0',
+            ]);
 
-        // Hitung total harga beli jika harga_beli ada
-        $total_harga = null;
-        if ($request->filled('harga_beli') && $request->filled('jumlah')) {
-            $total_harga = $request->harga_beli * $request->jumlah;
+            DB::beginTransaction();
+
+             $totalHargaBeliKeseluruhan = 0;
+            $restockDetailsData = [];
+
+            $productIds = collect($request->products)->pluck('product_id')->unique();
+            $products = Products::whereIn('id', $productIds)->lockForUpdate()->get()->keyBy('id');
+
+            foreach ($request->products as $item) {
+                $product = $products->get($item['product_id']);
+
+                if (!$product) {
+                    throw ValidationException::withMessages([
+                        "products.{$item['product_id']}.product_id" => "Produk dengan ID {$item['product_id']} tidak ditemukan."
+                    ]);
+                }
+
+                $subtotalItem = $item['jumlah'] * $item['harga_beli_per_unit'];
+                $totalHargaBeliKeseluruhan += $subtotalItem;
+
+                $restockDetailsData[] = [
+                    'product_id' => $item['product_id'],
+                    'jumlah' => $item['jumlah'],
+                    'harga_beli_per_unit' => $item['harga_beli_per_unit'],
+                    'subtotal_harga_beli' => $subtotalItem,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+
+                // Tambahkan stok produk
+                $product->increment('stok', $item['jumlah']); // Menggunakan increment() untuk atomicity
+            }
+
+            // Buat record restock utama
+            $restock = Restock::create([
+                'total_harga_beli' => $totalHargaBeliKeseluruhan,
+                'tanggal_restock' => $request->tanggal_restock,
+                'supplier' => $request->supplier,
+                'user_id' => Auth::id(), // User yang sedang login
+
+            ]);
+
+            // Simpan detail restock
+            $restock->details()->createMany($restockDetailsData);
+
+            DB::commit();
+
+            return redirect()->route('restocks.index')
+                ->with('success', 'Restock berhasil dicatat!');
+
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return redirect()->back()->withErrors($e->errors())->withInput();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()->with('error', 'Gagal mencatat restock: ' . $e->getMessage())->withInput();
         }
-
-       // Buat record restock baru di database
-        $restock = Restock::create([
-            'product_id' => $request->product_id,
-            'jumlah' => $request->jumlah,
-            'harga_beli' => $request->harga_beli,
-            'total_harga' => $total_harga, // Simpan hasil perhitungan
-            'tanggal_restock' => $request->tanggal_restock,
-            'supplier' => $request->supplier,
-            'user_id' => $request->user_id ?? Auth::id(), // Jika user_id tidak diisi, pakai user yang login
-        ]);
-
-        //Perbarui stok produk setelah restock
-        $product = Products::find($request->product_id);
-        if ($product) {
-            $product->stok += $request->jumlah;
-            $product->save();
-        }
-
-        return redirect()->route('restock')
-            ->with('success', 'Riwayat restock berhasil ditambahkan!');
     }
 
-    //Menampilkan detail riwayat restock tertentu.
-     public function show(Restock $restock): View
+    // Menampilkan detail riwayat restock tertentu.
+    public function show(Restock $restock): View
     {
         return view('restocks.show', compact('restock'));
     }
 
     // Edit - Menampilkan form edit
-    public function edit($id): View
+    public function edit(Restock $restock): View
     {
-        // Ambil semua produk dan user untuk dropdown di form edit
         $products = Products::all();
-        $users = User::all();
-        $restock = Restock::find($id);
-        return view('restock.edit', compact('restock'));
+        // Load detail restock dengan produk terkait agar bisa ditampilkan di form
+        $restock->load('details.product');
+        return view('restocks.edit', compact('restock', 'products'));
     }
 
-    // Update - Memperbarui data
-    public function update(Request $request,Restock $restock): RedirectResponse
+    // Update - Memperbarui data restock (bisa banyak produk)
+    public function update(Request $request, Restock $restock): RedirectResponse
     {
-        // Simpan jumlah lama sebelum update untuk perhitungan stok
-        $oldJmlh = $restock->jumlah;
-        $oldProductId = $restock->product_id;
+        try {
+            $request->validate([
+                'tanggal_restock' => 'required|date',
+                'supplier' => 'nullable|string|max:255',
+                'products' => 'required|array|min:1',
+                'products.*.id' => 'nullable|exists:restock_details,id', // ID detail restock yang sudah ada
+                'products.*.product_id' => 'required|exists:products,id',
+                'products.*.jumlah' => 'required|integer|min:1',
+                'products.*.harga_beli_per_unit' => 'required|numeric|min:0',
+            ]);
 
-        $request->validate([
-            'product_id' =>'required|exists:products,id',
-            'jumlah'=>'required',
-            'harga_beli'=>'required',
-            'tanggal_restock'=>'required|date',
-            'supplier'=>'nullable',
-            'user_id'=>'nullable|exists:users,id',
-        ]);
+            DB::beginTransaction();
 
-        // Hitung total harga beli jika harga_beli ada
-        $total_harga = null;
-        if ($request->filled('harga_beli') && $request->filled('jumlah')) {
-            $total_harga = $request->harga_beli * $request->jumlah;
+            $totalHargaBeliKeseluruhan = 0;
+            $updatedDetailIds = [];
+
+            $productIdsInRequest = collect($request->products)->pluck('product_id')->unique();
+            $productsFromDb = Products::whereIn('id', $productIdsInRequest)->lockForUpdate()->get()->keyBy('id');
+
+            $existingDetails = $restock->details->keyBy('id');
+
+            foreach ($request->products as $item) {
+                $product = $productsFromDb->get($item['product_id']);
+
+                if (!$product) {
+                    throw ValidationException::withMessages([
+                        "products.{$item['product_id']}.product_id" => "Produk dengan ID {$item['product_id']} tidak ditemukan."
+                    ]);
+                }
+
+                $subtotalItem = $item['jumlah'] * $item['harga_beli_per_unit'];
+                $totalHargaBeliKeseluruhan += $subtotalItem;
+
+                $detailId = $item['id'] ?? null;
+                $existingDetail = $existingDetails->get($detailId);
+
+                if ($existingDetail) {
+                    // Item sudah ada, update kuantitas dan harga
+                   $jumlahLama = $existingDetail->jumlah;
+                    $selisihJumlah = $item['jumlah'] - $jumlahLama;
+
+                    if ($selisihJumlah > 0) {
+                        // Jumlah restock bertambah, tambahkan stok
+                        $product->increment('stok', $selisihJumlah);
+                    } elseif ($selisihJumlah < 0) {
+                        // Jumlah restock berkurang, kurangi stok
+                        // Pastikan stok tidak menjadi negatif
+                        $stokTerkurangi = abs($selisihJumlah);
+                        if ($product->stok >= $stokTerkurangi) {
+                            $product->decrement('stok', $stokTerkurangi);
+                        } else {
+                            $product->stok = 0; // Jika tidak cukup, set ke 0
+                            $product->save();
+                        }
+                    }
+
+                    $existingDetail->update([
+                        'product_id' => $item['product_id'],
+                        'jumlah' => $item['jumlah'],
+                        'harga_beli_per_unit' => $item['harga_beli_per_unit'],
+                        'subtotal_harga_beli' => $subtotalItem,
+                    ]);
+                    $updatedDetailIds[] = $existingDetail->id;
+
+                } else {
+                    // PENAMBAHAN STOK SAAT MENAMBAH DETAIL BARU
+                    $product->increment('stok', $item['jumlah']);
+                    $newDetail = $restock->details()->create([
+                        'product_id' => $item['product_id'],
+                        'jumlah' => $item['jumlah'],
+                        'harga_beli_per_unit' => $item['harga_beli_per_unit'],
+                        'subtotal_harga_beli' => $subtotalItem,
+                    ]);
+                    $updatedDetailIds[] = $newDetail->id;
+                }
+            }
+
+            //PENGURANGAN STOK SAAT MENGHAPUS DETAIL LAMA
+            $detailsToDelete = $existingDetails->whereNotIn('id', $updatedDetailIds);
+            foreach ($detailsToDelete as $detail) {
+                $product = Products::find($detail->product_id); // Gunakan Products::find() agar selalu mendapatkan instance terbaru
+                if ($product) {
+                    // Kurangi stok yang sebelumnya ditambahkan oleh detail ini
+                    if ($product->stok >= $detail->jumlah) {
+                        $product->decrement('stok', $detail->jumlah);
+                    } else {
+                        $product->stok = 0; // Jika stok tidak cukup, set ke 0
+                        $product->save();
+                    }
+                }
+                $detail->delete();
+            }
+
+            // Update record restock utama
+            $restock->update([
+                'total_harga_beli' => $totalHargaBeliKeseluruhan,
+                'tanggal_restock' => $request->tanggal_restock,
+                'supplier' => $request->supplier,
+                'user_id' => Auth::id(),
+                'catatan' => $request->catatan,
+            ]);
+
+            DB::commit();
+
+            return redirect()->route('restocks.index')
+                ->with('success', 'Restock berhasil diupdate!');
+
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return redirect()->back()->withErrors($e->errors())->withInput();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()->with('error', 'Gagal memperbarui restock: ' . $e->getMessage())->withInput();
         }
-
-        $update = [
-            'product_id' => $request->product_id,
-            'jumlah' => $request->jumlah,
-            'harga_beli' => $request->harga_beli,
-            'total_harga' => $total_harga, // Simpan hasil perhitungan
-            'tanggal_restock' => $request->tanggal_restock,
-            'supplier' => $request->supplier,
-            'user_id' => $request->user_id ?? Auth::id(),
-        ];
-
-         // Perbarui stok produk setelah update
-        $newJmlh = $request->jumlah;
-        $newProductId = $request->product_id;
-
-        // menyesuaikan stok jika produk_id berubah atau jumlahnya
-        if ($oldProductId !== $newProductId) {
-            // Kurangi stok dari produk lama
-            $oldProduct = Products::find($oldProductId);
-            if ($oldProduct) {
-                $oldProduct->stok -= $oldJmlh;
-                $oldProduct->save();
-            }
-            // Tambahkan stok ke produk baru
-            $newProduct = Products::find($newProductId);
-            if ($newProduct) {
-                $newProduct->stok += $newJmlh;
-                $newProduct->save();
-            }
-        } else {
-            // Jika product_id sama, sesuaikan stok berdasarkan perubahan jumlah
-            $product = Products::find($newProductId);
-            if ($product) {
-                $stokDiff = $newJmlh - $oldJmlh; // Hitung perbedaan jumlah
-                $product->stok += $stokDiff;
-                $product->save();
-            }
-        }
-
-        return redirect()->route('restock')
-            ->with('success', 'Riwayat restock berhasil diupdate!');
     }
 
-    // Destroy - Menghapus data
-    public function destroy($restock): RedirectResponse
+    // Destroy - Menghapus data restock
+    public function destroy(Restock $restock): RedirectResponse
     {
-         // Kurangi stok produk saat restock dihapus
-        $product = Products::find($restock->product_id);
-        if ($product) {
-            $product->stok -= $restock->jumlah;
-            // Pastikan stok tidak menjadi negatif
-            if ($product->stok < 0) {
-                $product->stok = 0;
-            }
-            $product->save();
-        }
+        try {
+            DB::beginTransaction();
 
-        $restock->delete();
-        return redirect()->route('restock')
-            ->with('success', 'riwayat restock berhasil dihapus');
+            //LOGIKA PENGURANGAN STOK SAAT MENGHAPUS RESTOCK UTAMA
+            // Sebelum menghapus restock dan detailnya, kurangi stok produk
+            foreach ($restock->details as $detail) {
+                $product = Products::find($detail->product_id); // Gunakan Products::find()
+                if ($product) {
+                    // Kurangi stok yang sebelumnya ditambahkan
+                    if ($product->stok >= $detail->jumlah) {
+                        $product->decrement('stok', $detail->jumlah);
+                    } else {
+                        $product->stok = 0; // Jika stok tidak cukup, set ke 0
+                        $product->save();
+                    }
+                }
+            }
+
+            $restock->delete(); // Ini akan menghapus restock utama dan detailnya karena onDelete('cascade')
+
+            DB::commit();
+            return redirect()->route('restocks.index')
+                ->with('success', 'Riwayat restock berhasil dihapus dan stok dikurangi!');
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()->with('error', 'Gagal menghapus restock: ' . $e->getMessage());
+        }
     }
 }
-

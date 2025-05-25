@@ -2,7 +2,17 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ProductsController;
 
-Route::get('/user', function (Request $request) {
-    return $request->user();
-})->middleware('auth:sanctum');
+// Create account
+Route::post('/register', [ProductsController::class, 'addAccount']);
+
+// Login
+Route::post('/login', [ProductsController::class, 'login']);
+
+
+
+Route::put('/edit/{id}', [ProductsController::class, 'edit']);
+
+
+Route::delete('/delete/{id}', [ProductsController::class, 'delete']);

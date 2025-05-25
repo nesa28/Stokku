@@ -2,76 +2,114 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\View\View;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;// Untuk validasi unique pada update
 
 class UserController extends Controller
 {
-    // Index - Menampilkan semua data
-    public function index()
+    //Menampilkan daftar semua pengguna.
+    public function index(): View
     {
-        $user = User::all();
-        return view('user.index', compact('user'));
+        $users = User::latest()->paginate(10); // Ambil pengguna terbaru, 10 per halaman
+        return view('users.index', compact('users'));
     }
 
-    // Create - Menampilkan form tambah data
-    public function create()
+    //Menampilkan formulir untuk membuat pengguna baru.
+    public function create(): View
     {
-        return view('user.create');
+        return view('users.create');
     }
 
-    // Store - Menyimpan data baru
-    public function store(Request $request)
+
+    //Menyimpan pengguna baru ke database.
+    public function store(Request $request): RedirectResponse
     {
-        $request->validate([
-            'nim' => 'required',
-            'nama' => 'required',
-            'email' => 'required',
-            'jurusan' => 'required',
+        $validatedData = $request->validate([
+            'nama' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users,email', // Email harus unik
+            'password' => 'required|string|min:8|confirmed', // Kata sandi minimal 8 karakter dan harus dikonfirmasi
+            'nomor_telepon' => 'nullable|string|max:20',
         ]);
 
-        // Cara 1: Eloquent create
-        $mahasiswa = Mahasiswa::create($request->all());
-
-        return redirect()->route('mahasiswa')
-            ->with('success', 'Mahasiswa created successfully.');
-    }
-
-    // Edit - Menampilkan form edit
-    public function edit($id)
-    {
-        $mhs = Mahasiswa::find($id);
-        return view('mahasiswa.edit', compact('mhs'));
-    }
-
-    // Update - Memperbarui data
-    public function update(Request $request, $id)
-    {
-        $request->validate([
-            'nim' => 'required',
-            'nama' => 'required',
-            'email' => 'required',
-            'jurusan' => 'required',
+        User::create([
+            'nama' => $validatedData['nama'],
+            'email' => $validatedData['email'],
+            'password' => Hash::make($validatedData['password']), // Hash kata sandi untuk keamanan
+            'nomor_telepon' => $validatedData['nomor_telepon'],
+            'email_verified_at' => now(), // Anggap email langsung terverifikasi jika dibuat dari admin
         ]);
 
-        $update = [
-            'nim' => $request->nim,
-            'nama' => $request->nama,
-            'email' => $request->email,
-            'jurusan' => $request->jurusan,
+        return redirect()->route('users.index')
+                         ->with('success', 'Pengguna berhasil ditambahkan!');
+    }
+
+
+    //Menampilkan detail pengguna tertentu.
+    public function show(User $user): View
+    {
+        return view('users.show', compact('user'));
+    }
+
+    // Menampilkan formulir untuk mengedit pengguna tertentu.
+    public function edit(User $user): View
+    {
+        return view('users.edit', compact('user'));
+    }
+
+
+    //Memperbarui informasi pengguna di database.
+    public function update(Request $request, User $user): RedirectResponse
+    {
+        $validatedData = $request->validate([
+            'nama' => 'required|string|max:255',
+            'email' => [
+                'required',
+                'string',
+                'email',
+                'max:255',
+                Rule::unique('users')->ignore($user->id), // Email harus unik, kecuali untuk pengguna ini sendiri
+            ],
+            'nomor_telepon' => 'nullable|string|max:20',
+            'password' => 'nullable|string|min:8|confirmed', // Kata sandi bersifat opsional saat update
+        ]);
+
+        $updateData = [
+            'nama' => $validatedData['nama'],
+            'email' => $validatedData['email'],
+            'nomor_telepon' => $validatedData['nomor_telepon'],
         ];
 
-        Mahasiswa::whereId($id)->update($update);
-        return redirect()->route('mahasiswa')
-            ->with('success', 'Mahasiswa updated successfully');
+        // Perbarui kata sandi hanya jika diisi oleh pengguna
+        if (!empty($validatedData['password'])) {
+            $updateData['password'] = Hash::make($validatedData['password']);
+        }
+
+        $user->update($updateData);
+
+        return redirect()->route('users.index')
+                         ->with('success', 'Profil pengguna berhasil diperbarui!');
     }
 
-    // Destroy - Menghapus data
-    public function destroy($id)
+    // Menghapus pengguna dari database.
+    public function destroy(User $user): RedirectResponse 
     {
-        $mhs = Mahasiswa::find($id);
-        $mhs->delete();
-        return redirect()->route('mahasiswa')
-            ->with('success', 'Mahasiswa deleted successfully');
+        // Cegah penghapusan jika pengguna memiliki transaksi atau restock terkait
+        if ($user->transactions()->exists()) {
+            return redirect()->route('users.index')
+                ->with('error', 'Pengguna tidak dapat dihapus karena memiliki riwayat transaksi terkait.');
+        }
+
+        if ($user->restocks()->exists()) {
+            return redirect()->route('users.index')
+                ->with('error', 'Pengguna tidak dapat dihapus karena memiliki riwayat restock terkait.');
+        }
+
+        $user->delete(); // Hapus pengguna
+        return redirect()->route('users.index')
+                         ->with('success', 'Pengguna berhasil dihapus!');
     }
 }
