@@ -18,33 +18,43 @@ class RestockController extends Controller
     // Index - Menampilkan semua data restock utama dengan detailnya
     public function index(): View
     {
-        $restocks = Restock::with(['user', 'details.product'])->latest()->paginate(10);
+        // Only fetch restocks created by the currently authenticated user
+        $restocks = Restock::where('user_id', auth()->id())
+            ->with(['user', 'details.product'])
+            ->latest()
+            ->paginate(10);
+
         return view('restocks.index', compact('restocks'));
     }
 
     // Create - Menampilkan form tambah data
-    public function create(): View
+    public function create()
     {
-        $products = Products::all(); // Ambil semua produk
-        return view('restocks.create', compact('products'));
+        $allproducts = Products::all(); // Ambil semua produk
+        return view('restocks.create', compact('allproducts'));
     }
 
     // Store - Menyimpan data restock baru (bisa banyak produk)
     public function store(Request $request)
     {
         try {
-            $request->validate([
+            $validatedData = $request->validate([
                 'tanggal_restock' => 'required|date',
                 'supplier' => 'nullable|string|max:255',
                 'products' => 'required|array|min:1', // Harus ada setidaknya satu produk
                 'products.*.product_id' => 'required|exists:products,id',
                 'products.*.jumlah' => 'required|integer|min:1',
                 'products.*.harga_beli_per_unit' => 'required|numeric|min:0',
+
             ]);
 
+            // Create the restock, ensuring user_id is set
+            $restock = Restock::create(array_merge($validatedData, [
+                'user_id' => auth()->id(), // <-- Add this line
+            ]));
             DB::beginTransaction();
 
-             $totalHargaBeliKeseluruhan = 0;
+            $totalHargaBeliKeseluruhan = 0;
             $restockDetailsData = [];
 
             $productIds = collect($request->products)->pluck('product_id')->unique();
@@ -70,9 +80,20 @@ class RestockController extends Controller
                     'created_at' => now(),
                     'updated_at' => now(),
                 ];
+                // Update stok produk
+                $product = Products::find($item['product_id']);
+                if ($product) {
+                    $product->stok += $item['jumlah'];
+                    $product->save();
+                }
 
-                // Tambahkan stok produk
-                $product->increment('stok', $item['jumlah']); // Menggunakan increment() untuk atomicity
+                // Jika produk tidak ditemukan, lemparkan exception
+                if (!$product) {
+                    throw ValidationException::withMessages([
+                        "products.{$item['product_id']}.product_id" => "Produk dengan ID {$item['product_id']} tidak ditemukan."
+                    ]);
+                }
+
             }
 
             // Buat record restock utama
@@ -101,18 +122,23 @@ class RestockController extends Controller
         }
     }
 
-    // Menampilkan detail riwayat restock tertentu.
+    // Show - Menampilkan detail restock tertentu
     public function show(Restock $restock): View
     {
+        if ($restock->user_id !== auth()->id()) {
+            abort(403);
+        }
+        $restock->load('details.product');
         return view('restocks.show', compact('restock'));
     }
 
     // Edit - Menampilkan form edit
     public function edit(Restock $restock): View
     {
-        $products = Products::all();
-        // Load detail restock dengan produk terkait agar bisa ditampilkan di form
-        $restock->load('details.product');
+        if ($restock->user_id !== auth()->id()) {
+            abort(403);
+        }
+        $products = Products::all(); // Assuming edit needs products for dropdown
         return view('restocks.edit', compact('restock', 'products'));
     }
 
@@ -120,6 +146,9 @@ class RestockController extends Controller
     public function update(Request $request, Restock $restock): RedirectResponse
     {
         try {
+            if ($restock->user_id !== auth()->id()) {
+                abort(403);
+            }
             $request->validate([
                 'tanggal_restock' => 'required|date',
                 'supplier' => 'nullable|string|max:255',
@@ -157,7 +186,7 @@ class RestockController extends Controller
 
                 if ($existingDetail) {
                     // Item sudah ada, update kuantitas dan harga
-                   $jumlahLama = $existingDetail->jumlah;
+                    $jumlahLama = $existingDetail->jumlah;
                     $selisihJumlah = $item['jumlah'] - $jumlahLama;
 
                     if ($selisihJumlah > 0) {
@@ -239,6 +268,9 @@ class RestockController extends Controller
     public function destroy(Restock $restock): RedirectResponse
     {
         try {
+            if ($restock->user_id !== auth()->id()) {
+                abort(403);
+            }
             DB::beginTransaction();
 
             //LOGIKA PENGURANGAN STOK SAAT MENGHAPUS RESTOCK UTAMA
@@ -267,4 +299,28 @@ class RestockController extends Controller
             return redirect()->back()->with('error', 'Gagal menghapus restock: ' . $e->getMessage());
         }
     }
+
+    // New search function
+    public function search(Request $request): View
+    {
+        $searchValue = trim($request->search ?? '');
+
+        // Only search restocks created by the currently authenticated user
+        $restocks = Restock::where('user_id', auth()->id()) // <-- Added this line
+            ->with(['user', 'details.product'])
+            ->when(ctype_digit($searchValue), function ($query) use ($searchValue) {
+                $query->where('id', (int) $searchValue);
+            })
+            ->when(!ctype_digit($searchValue) && !empty($searchValue), function ($query) use ($searchValue) {
+                $query->where('supplier', 'ILIKE', '%' . $searchValue . '%');
+                $query->orWhereHas('details.product', function ($q) use ($searchValue) {
+                    $q->where('nama_produk', 'ILIKE', '%' . $searchValue . '%');
+                });
+            })
+            ->latest()
+            ->paginate(10);
+
+        return view('restocks.index', compact('restocks'));
+    }
 }
+

@@ -36,10 +36,27 @@ return [
     */
 
     'guards' => [
+        //web is the default guard for web applications
         'web' => [
+            //driver means how the authentication will be handled
+            //session means that the authentication will be handled using session storage
+            //provider means how the users will be retrieved from the database
+            //users is the name of the provider defined below
             'driver' => 'session',
             'provider' => 'users',
         ],
+        //api is the guard for API applications
+        'api' => [
+            //jwt means that the authentication will be handled using JSON Web Tokens
+            //user will be retrieved from the users provider
+            //this guard is typically used for stateless authentication in APIs
+            'driver' => 'jwt',
+            'provider' => 'users',
+        ],
+        //main difference between web and api guards is the driver used
+        //web uses session driver, while api uses jwt driver
+        //in this project we use jwt for API authentication
+        //but the web guard is still available for web applications
     ],
 
     /*

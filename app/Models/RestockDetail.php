@@ -26,6 +26,11 @@ class RestockDetail extends Model
         'subtotal_harga_beli' => 'decimal:2',
     ];
 
+    public function scopeSearchByRestockId($query, $restockId)
+    {
+        return $query->where('restock_id', $restockId);
+    }
+
     public function restock(): BelongsTo
     {
         return $this->belongsTo(Restock::class);
@@ -33,6 +38,7 @@ class RestockDetail extends Model
 
     public function product(): BelongsTo
     {
-        return $this->belongsTo(Products::class); 
+        return $this->belongsTo(Products::class);
     }
+
 }

@@ -9,8 +9,9 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\Relations\HasMany; // Import HasMany untuk relasi
+use Tymon\JWTAuth\Contracts\JWTSubject; // Import JWTSubject jika menggunakan JWT
 
-class User extends Authenticatable implements MustVerifyEmail
+class User extends Authenticatable implements JWTSubject
 {
     use HasFactory, Notifiable, HasApiTokens;
 
@@ -20,7 +21,7 @@ class User extends Authenticatable implements MustVerifyEmail
      * @var list<string>
      */
     protected $fillable = [
-        'nama',
+        'name',
         'email',
         'password',
         'nomor_telepon',
@@ -49,11 +50,35 @@ class User extends Authenticatable implements MustVerifyEmail
         ];
     }
 
+    /**
+     * Get the identifier that will be stored in the subject claim of the JWT.
+     */
+    public function getJWTIdentifier()
+    {
+        return $this->getKey();
+    }
+
+    /**
+     * Return a key value array, containing any custom claims to be added to the JWT.
+     */
+    public function getJWTCustomClaims()
+    {
+        return [];
+    }
+
+    /**
+     *  Get the transactions associated with the user.
+     *  This method defines a one-to-many relationship between User and Transaction models.
+     */
     public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class, 'user_id', 'id');
     }
 
+    /**
+     * Get the restocks associated with the user.
+     * This method defines a one-to-many relationship between User and Restock models.
+     */
     public function restocks(): HasMany
     {
         return $this->hasMany(Restock::class, 'user_id', 'id');

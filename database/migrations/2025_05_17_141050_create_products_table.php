@@ -20,7 +20,7 @@ return new class extends Migration
             $table->decimal('harga_satuan', 10, 2)->unsigned()->default(0.00);// untuk harga dalam satuan //nama kolom, maks digit keseluruhan 10, 2 angka di belakang koma,unsigned(): harga tidak mungkin bernilai negatif, dan default(0.00): Jika produk baru secara default memiliki harga 0.
             $table->boolean('bisa_atau_tdk_diecer')->default(false)->comment('Apakah produk bisa dijual eceran?');
             $table->string('unit_eceran')->nullable()->comment('Eceran (misal: kg, bks)');
-            $table->decimal('harga_eceran_per_unit', 10, 2)->unsigned()->default(0.00); // harga untuk barang dalam bentuk eceran
+            $table->decimal('harga_eceran_per_unit', 10, 2)->unsigned()->default(0.00)->nullable(); // harga untuk barang dalam bentuk eceran
             $table->timestamps();
         });
     }
