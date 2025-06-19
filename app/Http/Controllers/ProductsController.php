@@ -36,7 +36,7 @@ class ProductsController extends Controller
         ]);
 
         // Cara 1: Eloquent create
-        $products = Products::create($request->all());
+        $products = Products::create($request->all()); // buat keamanan pake request aja
 
         return redirect()->route('products')
             ->with('success', 'Produk berhasil ditambahkan!');
