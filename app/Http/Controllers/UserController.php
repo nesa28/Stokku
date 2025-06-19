@@ -7,61 +7,59 @@ use Illuminate\Http\Request;
 use Illuminate\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rule;// Untuk validasi unique pada update
+use Illuminate\Validation\Rule; // Untuk validasi unique pada update
 
+// Controller untuk manajemen data pengguna
 class UserController extends Controller
 {
-    //Menampilkan daftar semua pengguna.
+    // Menampilkan daftar semua pengguna
     public function index(): View
     {
-        $users = User::latest()->paginate(10); // Ambil pengguna terbaru, 10 per halaman
+        $users = User::latest()->paginate(10);
         return view('users.index', compact('users'));
     }
 
-    //Menampilkan formulir untuk membuat pengguna baru.
+    // Menampilkan form tambah pengguna baru
     public function create(): View
     {
         return view('users.create');
     }
 
-
-    //Menyimpan pengguna baru ke database.
+    // Menyimpan pengguna baru ke database
     public function store(Request $request): RedirectResponse
     {
         $validatedData = $request->validate([
             'nama' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users,email', // Email harus unik
-            'password' => 'required|string|min:8|confirmed', // Kata sandi minimal 8 karakter dan harus dikonfirmasi
+            'email' => 'required|string|email|max:255|unique:users,email',
+            'password' => 'required|string|min:8|confirmed',
             'nomor_telepon' => 'nullable|string|max:20',
         ]);
 
         User::create([
             'nama' => $validatedData['nama'],
             'email' => $validatedData['email'],
-            'password' => Hash::make($validatedData['password']), // Hash kata sandi untuk keamanan
+            'password' => Hash::make($validatedData['password']),
             'nomor_telepon' => $validatedData['nomor_telepon'],
-            'email_verified_at' => now(), // Anggap email langsung terverifikasi jika dibuat dari admin
+            'email_verified_at' => now(),
         ]);
 
         return redirect()->route('users.index')
                          ->with('success', 'Pengguna berhasil ditambahkan!');
     }
 
-
-    //Menampilkan detail pengguna tertentu.
+    // Menampilkan detail pengguna tertentu
     public function show(User $user): View
     {
         return view('users.show', compact('user'));
     }
 
-    // Menampilkan formulir untuk mengedit pengguna tertentu.
+    // Menampilkan form edit pengguna
     public function edit(User $user): View
     {
         return view('users.edit', compact('user'));
     }
 
-
-    //Memperbarui informasi pengguna di database.
+    // Memperbarui informasi pengguna
     public function update(Request $request, User $user): RedirectResponse
     {
         $validatedData = $request->validate([
@@ -71,10 +69,10 @@ class UserController extends Controller
                 'string',
                 'email',
                 'max:255',
-                Rule::unique('users')->ignore($user->id), // Email harus unik, kecuali untuk pengguna ini sendiri
+                Rule::unique('users')->ignore($user->id),
             ],
             'nomor_telepon' => 'nullable|string|max:20',
-            'password' => 'nullable|string|min:8|confirmed', // Kata sandi bersifat opsional saat update
+            'password' => 'nullable|string|min:8|confirmed',
         ]);
 
         $updateData = [
@@ -83,7 +81,7 @@ class UserController extends Controller
             'nomor_telepon' => $validatedData['nomor_telepon'],
         ];
 
-        // Perbarui kata sandi hanya jika diisi oleh pengguna
+        // Update password jika diisi
         if (!empty($validatedData['password'])) {
             $updateData['password'] = Hash::make($validatedData['password']);
         }
@@ -94,10 +92,10 @@ class UserController extends Controller
                          ->with('success', 'Profil pengguna berhasil diperbarui!');
     }
 
-    // Menghapus pengguna dari database.
-    public function destroy(User $user): RedirectResponse 
+    // Menghapus pengguna dari database
+    public function destroy(User $user): RedirectResponse
     {
-        // Cegah penghapusan jika pengguna memiliki transaksi atau restock terkait
+        // Cegah hapus jika user punya transaksi/restock
         if ($user->transactions()->exists()) {
             return redirect()->route('users.index')
                 ->with('error', 'Pengguna tidak dapat dihapus karena memiliki riwayat transaksi terkait.');
@@ -108,7 +106,7 @@ class UserController extends Controller
                 ->with('error', 'Pengguna tidak dapat dihapus karena memiliki riwayat restock terkait.');
         }
 
-        $user->delete(); // Hapus pengguna
+        $user->delete();
         return redirect()->route('users.index')
                          ->with('success', 'Pengguna berhasil dihapus!');
     }

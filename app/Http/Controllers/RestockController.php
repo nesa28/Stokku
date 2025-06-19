@@ -13,12 +13,12 @@ use Illuminate\Validation\ValidationException; // Untuk penanganan validasi
 use Illuminate\View\View;
 use Illuminate\Http\RedirectResponse;
 
+// Controller untuk manajemen restock barang
 class RestockController extends Controller
 {
-    // Index - Menampilkan semua data restock utama dengan detailnya
+    // Menampilkan daftar restock milik user
     public function index(): View
     {
-        // Only fetch restocks created by the currently authenticated user
         $restocks = Restock::where('user_id', auth()->id())
             ->with(['user', 'details.product'])
             ->latest()
@@ -27,31 +27,26 @@ class RestockController extends Controller
         return view('restocks.index', compact('restocks'));
     }
 
-    // Create - Menampilkan form tambah data
+    // Menampilkan form tambah restock
     public function create()
     {
-        $allproducts = Products::all(); // Ambil semua produk
+        $allproducts = Products::all();
         return view('restocks.create', compact('allproducts'));
     }
 
-    // Store - Menyimpan data restock baru (bisa banyak produk)
+    // Menyimpan data restock baru (bisa banyak produk)
     public function store(Request $request)
     {
         try {
             $validatedData = $request->validate([
                 'tanggal_restock' => 'required|date',
                 'supplier' => 'nullable|string|max:255',
-                'products' => 'required|array|min:1', // Harus ada setidaknya satu produk
+                'products' => 'required|array|min:1',
                 'products.*.product_id' => 'required|exists:products,id',
                 'products.*.jumlah' => 'required|integer|min:1',
                 'products.*.harga_beli_per_unit' => 'required|numeric|min:0',
-
             ]);
 
-            // Create the restock, ensuring user_id is set
-            $restock = Restock::create(array_merge($validatedData, [
-                'user_id' => auth()->id(), // <-- Add this line
-            ]));
             DB::beginTransaction();
 
             $totalHargaBeliKeseluruhan = 0;
@@ -80,20 +75,10 @@ class RestockController extends Controller
                     'created_at' => now(),
                     'updated_at' => now(),
                 ];
+
                 // Update stok produk
-                $product = Products::find($item['product_id']);
-                if ($product) {
-                    $product->stok += $item['jumlah'];
-                    $product->save();
-                }
-
-                // Jika produk tidak ditemukan, lemparkan exception
-                if (!$product) {
-                    throw ValidationException::withMessages([
-                        "products.{$item['product_id']}.product_id" => "Produk dengan ID {$item['product_id']} tidak ditemukan."
-                    ]);
-                }
-
+                $product->stok += $item['jumlah'];
+                $product->save();
             }
 
             // Buat record restock utama
@@ -101,8 +86,7 @@ class RestockController extends Controller
                 'total_harga_beli' => $totalHargaBeliKeseluruhan,
                 'tanggal_restock' => $request->tanggal_restock,
                 'supplier' => $request->supplier,
-                'user_id' => Auth::id(), // User yang sedang login
-
+                'user_id' => Auth::id(),
             ]);
 
             // Simpan detail restock
@@ -122,7 +106,7 @@ class RestockController extends Controller
         }
     }
 
-    // Show - Menampilkan detail restock tertentu
+    // Menampilkan detail restock tertentu
     public function show(Restock $restock): View
     {
         if ($restock->user_id !== auth()->id()) {
@@ -132,17 +116,17 @@ class RestockController extends Controller
         return view('restocks.show', compact('restock'));
     }
 
-    // Edit - Menampilkan form edit
+    // Menampilkan form edit restock
     public function edit(Restock $restock): View
     {
         if ($restock->user_id !== auth()->id()) {
             abort(403);
         }
-        $products = Products::all(); // Assuming edit needs products for dropdown
+        $products = Products::all();
         return view('restocks.edit', compact('restock', 'products'));
     }
 
-    // Update - Memperbarui data restock (bisa banyak produk)
+    // Memperbarui data restock (bisa banyak produk)
     public function update(Request $request, Restock $restock): RedirectResponse
     {
         try {
@@ -153,7 +137,7 @@ class RestockController extends Controller
                 'tanggal_restock' => 'required|date',
                 'supplier' => 'nullable|string|max:255',
                 'products' => 'required|array|min:1',
-                'products.*.id' => 'nullable|exists:restock_details,id', // ID detail restock yang sudah ada
+                'products.*.id' => 'nullable|exists:restock_details,id',
                 'products.*.product_id' => 'required|exists:products,id',
                 'products.*.jumlah' => 'required|integer|min:1',
                 'products.*.harga_beli_per_unit' => 'required|numeric|min:0',
@@ -185,21 +169,18 @@ class RestockController extends Controller
                 $existingDetail = $existingDetails->get($detailId);
 
                 if ($existingDetail) {
-                    // Item sudah ada, update kuantitas dan harga
+                    // Update stok jika jumlah berubah
                     $jumlahLama = $existingDetail->jumlah;
                     $selisihJumlah = $item['jumlah'] - $jumlahLama;
 
                     if ($selisihJumlah > 0) {
-                        // Jumlah restock bertambah, tambahkan stok
                         $product->increment('stok', $selisihJumlah);
                     } elseif ($selisihJumlah < 0) {
-                        // Jumlah restock berkurang, kurangi stok
-                        // Pastikan stok tidak menjadi negatif
                         $stokTerkurangi = abs($selisihJumlah);
                         if ($product->stok >= $stokTerkurangi) {
                             $product->decrement('stok', $stokTerkurangi);
                         } else {
-                            $product->stok = 0; // Jika tidak cukup, set ke 0
+                            $product->stok = 0;
                             $product->save();
                         }
                     }
@@ -213,7 +194,7 @@ class RestockController extends Controller
                     $updatedDetailIds[] = $existingDetail->id;
 
                 } else {
-                    // PENAMBAHAN STOK SAAT MENAMBAH DETAIL BARU
+                    // Tambah detail baru dan update stok
                     $product->increment('stok', $item['jumlah']);
                     $newDetail = $restock->details()->create([
                         'product_id' => $item['product_id'],
@@ -225,23 +206,22 @@ class RestockController extends Controller
                 }
             }
 
-            //PENGURANGAN STOK SAAT MENGHAPUS DETAIL LAMA
+            // Hapus detail lama yang tidak ada di request dan kurangi stok
             $detailsToDelete = $existingDetails->whereNotIn('id', $updatedDetailIds);
             foreach ($detailsToDelete as $detail) {
-                $product = Products::find($detail->product_id); // Gunakan Products::find() agar selalu mendapatkan instance terbaru
+                $product = Products::find($detail->product_id);
                 if ($product) {
-                    // Kurangi stok yang sebelumnya ditambahkan oleh detail ini
                     if ($product->stok >= $detail->jumlah) {
                         $product->decrement('stok', $detail->jumlah);
                     } else {
-                        $product->stok = 0; // Jika stok tidak cukup, set ke 0
+                        $product->stok = 0;
                         $product->save();
                     }
                 }
                 $detail->delete();
             }
 
-            // Update record restock utama
+            // Update restock utama
             $restock->update([
                 'total_harga_beli' => $totalHargaBeliKeseluruhan,
                 'tanggal_restock' => $request->tanggal_restock,
@@ -264,7 +244,7 @@ class RestockController extends Controller
         }
     }
 
-    // Destroy - Menghapus data restock
+    // Menghapus data restock dan mengurangi stok produk
     public function destroy(Restock $restock): RedirectResponse
     {
         try {
@@ -273,22 +253,19 @@ class RestockController extends Controller
             }
             DB::beginTransaction();
 
-            //LOGIKA PENGURANGAN STOK SAAT MENGHAPUS RESTOCK UTAMA
-            // Sebelum menghapus restock dan detailnya, kurangi stok produk
             foreach ($restock->details as $detail) {
-                $product = Products::find($detail->product_id); // Gunakan Products::find()
+                $product = Products::find($detail->product_id);
                 if ($product) {
-                    // Kurangi stok yang sebelumnya ditambahkan
                     if ($product->stok >= $detail->jumlah) {
                         $product->decrement('stok', $detail->jumlah);
                     } else {
-                        $product->stok = 0; // Jika stok tidak cukup, set ke 0
+                        $product->stok = 0;
                         $product->save();
                     }
                 }
             }
 
-            $restock->delete(); // Ini akan menghapus restock utama dan detailnya karena onDelete('cascade')
+            $restock->delete();
 
             DB::commit();
             return redirect()->route('restocks.index')
@@ -300,13 +277,12 @@ class RestockController extends Controller
         }
     }
 
-    // New search function
+    // Pencarian restock milik user
     public function search(Request $request): View
     {
         $searchValue = trim($request->search ?? '');
 
-        // Only search restocks created by the currently authenticated user
-        $restocks = Restock::where('user_id', auth()->id()) // <-- Added this line
+        $restocks = Restock::where('user_id', auth()->id())
             ->with(['user', 'details.product'])
             ->when(ctype_digit($searchValue), function ($query) use ($searchValue) {
                 $query->where('id', (int) $searchValue);
@@ -323,4 +299,3 @@ class RestockController extends Controller
         return view('restocks.index', compact('restocks'));
     }
 }
-

@@ -8,9 +8,10 @@ use App\Models\Activity;
 use Illuminate\View\View;
 use Illuminate\Support\Facades\Auth;
 
+// Controller untuk manajemen produk
 class ProductsController extends Controller
 {
-
+    // Mencatat aktivitas produk (create, update, dll)
     private function recordActivity($type, $product, $description = null)
     {
         Activity::create([
@@ -27,13 +28,14 @@ class ProductsController extends Controller
         ]);
     }
 
+    // Menampilkan daftar produk dengan filter, pencarian, dan sorting
     public function index(Request $request): View
     {
         $eceranFilter = $request->input('eceran_filter');
         $searchValue = trim($request->input('search') ?? '');
-        $sortBy = $request->input('sort_by', 'latest'); // Ambil parameter sort_by, default 'latest'
+        $sortBy = $request->input('sort_by', 'latest');
 
-        $products = Products::where('user_id', auth()->id()) // Filter kepemilikan user
+        $products = Products::where('user_id', auth()->id())
             ->when(!empty($searchValue), function ($query) use ($searchValue) {
                 if (ctype_digit($searchValue)) {
                     $query->where('id', (int) $searchValue);
@@ -45,7 +47,7 @@ class ProductsController extends Controller
                 $query->where('bisa_atau_tdk_diecer', (bool) $eceranFilter);
             });
 
-        // Apply sorting logic
+        // Sorting produk
         switch ($sortBy) {
             case 'oldest':
                 $products->orderBy('created_at', 'asc');
@@ -68,28 +70,28 @@ class ProductsController extends Controller
             case 'stock_desc':
                 $products->orderBy('stok', 'desc');
                 break;
-            case 'latest': // Default
+            case 'latest':
             default:
                 $products->orderBy('created_at', 'desc');
                 break;
         }
 
-        $products = $products->paginate(20); // Gunakan pagination
+        $products = $products->paginate(20);
 
-        return view('products.index', compact('products')); // Sesuaikan dengan nama view Anda
+        return view('products.index', compact('products'));
     }
 
-    // Create - Menampilkan form tambah data
+    // Menampilkan form tambah produk
     public function create(): View
     {
         return view('products.create');
     }
 
-    // Store - Menyimpan data baru
+    // Menyimpan produk baru
     public function store(Request $request)
     {
         $validatedData = $request->validate([
-            'nama_produk' => 'required', // memastikan tidak kosong
+            'nama_produk' => 'required',
             'satuan' => 'required',
             'stok'=> 'required|integer|min:0',
             'harga_satuan'=> 'required',
@@ -98,37 +100,35 @@ class ProductsController extends Controller
             'harga_eceran_per_unit'=> 'nullable',
         ]);
 
-        // Cara 1: Eloquent create
         $products = Products::create($request->all());
 
-        // Record activity
-        $this->recordActivity('create', $product);
+        // Catat aktivitas create
+        $this->recordActivity('create', $products);
 
         return redirect()->route('products.index')
             ->with('success', 'Produk berhasil ditambahkan!');
     }
 
-    //Menampilkan detail produk tertentu.
+    // Menampilkan detail produk tertentu
     public function show(Products $products): View
     {
         return view('products.show', compact('product'));
     }
 
-    // Edit - Menampilkan form edit
+    // Menampilkan form edit produk
     public function edit(Products $product): View
     {
         if ($product->user_id !== auth()->id()) {
-            abort(403); // Forbidden access
+            abort(403);
         }
         return view('products.edit', compact('product'));
     }
 
-    // Update - Memperbarui data
+    // Memperbarui data produk
     public function update(Request $request, Products $product)
     {
-        // Authorize: ensure only the owner can update
         if ($product->user_id !== auth()->id()) {
-            abort(403); // Forbidden access
+            abort(403);
         }
 
         $validatedData = $request->validate([
@@ -143,19 +143,18 @@ class ProductsController extends Controller
 
         $product->update($validatedData);
 
-        // Record activity
+        // Catat aktivitas update
         $this->recordActivity('update', $product);
 
         return redirect()->route('products.index')
             ->with('success', 'Produk berhasil diupdate!');
     }
 
-    // Destroy - Menghapus data
+    // Menghapus produk
     public function destroy(Products $product)
     {
-        // Authorize: ensure only the owner can delete
         if ($product->user_id !== auth()->id()) {
-            abort(403); // Forbidden access
+            abort(403);
         }
         $product->delete();
 
@@ -163,8 +162,9 @@ class ProductsController extends Controller
             ->with('success', 'Produk berhasil dihapus');
     }
 
+    // Pencarian produk (memanggil index agar DRY)
     public function search(Request $request): View
     {
-        return $this->index($request); // Cukup panggil metode index untuk DRY (Don't Repeat Yourself)
+        return $this->index($request);
     }
 }

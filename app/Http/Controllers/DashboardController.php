@@ -10,6 +10,7 @@ use App\Models\User;        // Import User model
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
+// Controller untuk menampilkan dashboard
 class DashboardController extends Controller
 {
     public function index(): View

@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -11,15 +10,13 @@ use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\Relations\HasMany; // Import HasMany untuk relasi
 use Tymon\JWTAuth\Contracts\JWTSubject; // Import JWTSubject jika menggunakan JWT
 
+
+// Model User untuk autentikasi dan relasi data user
 class User extends Authenticatable implements JWTSubject
 {
     use HasFactory, Notifiable, HasApiTokens;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
+    // Kolom yang boleh diisi secara massal
     protected $fillable = [
         'name',
         'email',
@@ -27,21 +24,13 @@ class User extends Authenticatable implements JWTSubject
         'nomor_telepon',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
+    // Kolom yang disembunyikan saat serialisasi
     protected $hidden = [
         'password',
         'remember_token',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
+    // Tipe data kolom
     protected function casts(): array
     {
         return [
@@ -50,35 +39,25 @@ class User extends Authenticatable implements JWTSubject
         ];
     }
 
-    /**
-     * Get the identifier that will be stored in the subject claim of the JWT.
-     */
+    // JWT: Mengambil identifier user untuk token
     public function getJWTIdentifier()
     {
         return $this->getKey();
     }
 
-    /**
-     * Return a key value array, containing any custom claims to be added to the JWT.
-     */
+    // JWT: Custom claims (kosong)
     public function getJWTCustomClaims()
     {
         return [];
     }
 
-    /**
-     *  Get the transactions associated with the user.
-     *  This method defines a one-to-many relationship between User and Transaction models.
-     */
+    // Relasi: User memiliki banyak transaksi
     public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class, 'user_id', 'id');
     }
 
-    /**
-     * Get the restocks associated with the user.
-     * This method defines a one-to-many relationship between User and Restock models.
-     */
+    // Relasi: User memiliki banyak restock
     public function restocks(): HasMany
     {
         return $this->hasMany(Restock::class, 'user_id', 'id');

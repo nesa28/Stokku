@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // membuat tabel products
+        // membuat tabel products untuk  menyimpan data produk
         Schema::create('products', function (Blueprint $table) {
             $table->id();
             $table->string('nama_produk');

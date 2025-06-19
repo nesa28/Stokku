@@ -11,12 +11,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Http\RedirectResponse;
 
+// Controller untuk manajemen transaksi penjualan
 class TransactionController extends Controller
 {
+    // Menampilkan daftar transaksi milik user
     public function index()
     {
-        // Hanya mengambil transaksi yang dibuat oleh pengguna yang sedang login
-        $transactions = Transaction::where('user_id', auth()->id()) // <-- Perubahan penting di sini
+        $transactions = Transaction::where('user_id', auth()->id())
             ->with(['details.product'])
             ->latest()
             ->paginate(10);
@@ -24,14 +25,14 @@ class TransactionController extends Controller
         return view('transactions.index', compact('transactions'));
     }
 
-    // Create - Menampilkan form tambah data
+    // Menampilkan form tambah transaksi
     public function create(): View
     {
         $products = Products::all();
         return view('transactions.create', compact('products'));
     }
 
-    // Store - Menyimpan data baru
+    // Menyimpan transaksi baru
     public function store(Request $request): RedirectResponse
     {
         try {
@@ -64,7 +65,7 @@ class TransactionController extends Controller
                 $kuantitasDijual = $item['jumlah'];
                 $jenisPenjualan = $item['jenis_penjualan'];
                 $hargaPerUnitFinal = 0;
-                $stokYangDikurangi = 0; // Default 0, hanya berubah untuk satuan
+                $stokYangDikurangi = 0;
 
                 if ($jenisPenjualan === 'satuan') {
                     $hargaPerUnitFinal = $product->harga_satuan;
@@ -76,14 +77,14 @@ class TransactionController extends Controller
                         ]);
                     }
                     $hargaPerUnitFinal = $product->harga_eceran_per_unit;
-                    $stokYangDikurangi = 0; // Stok tidak dikurangi untuk penjualan eceran
+                    $stokYangDikurangi = 0;
                 } else {
                     throw ValidationException::withMessages([
                         "products.{$index}.jenis_penjualan" => "Jenis penjualan tidak valid untuk produk '{$product->nama_produk}'."
                     ]);
                 }
 
-                if ($stokYangDikurangi > 0) { // Hanya cek stok jika ada yang akan dikurangi
+                if ($stokYangDikurangi > 0) {
                     if ($product->stok < $stokYangDikurangi) {
                         throw ValidationException::withMessages([
                             "products.{$index}.jumlah" => "Stok tidak cukup untuk produk: {$product->nama_produk}. Stok tersedia: {$product->stok} (satuan)."
@@ -110,7 +111,7 @@ class TransactionController extends Controller
                 'total_transaksi' => $totalTransaksiKeseluruhan,
                 'tanggal_transaksi' => $request->tanggal_transaksi,
                 'pelanggan' => $request->pelanggan,
-                'user_id' => auth()->id(), // user_id dari yang sedang login
+                'user_id' => auth()->id(),
             ]);
 
             $transaction->details()->createMany($transactionDetailsData);
@@ -128,23 +129,19 @@ class TransactionController extends Controller
         }
     }
 
-    //Show - Menampilkan detail.
+    // Menampilkan detail transaksi tertentu
     public function show(Transaction $transaction)
     {
-        // Pastikan hanya pemilik transaksi yang bisa melihat
         if ($transaction->user_id !== auth()->id()) {
-            abort(403, 'Anda tidak memiliki akses untuk melihat transaksi ini.'); // Forbidden
+            abort(403, 'Anda tidak memiliki akses untuk melihat transaksi ini.');
         }
-        // return response()->json($transaction->load('details.product')); // Jika ini untuk API
-        // Jika ini untuk view Blade, seharusnya:
         $transaction->load('details.product');
         return view('transactions.show', compact('transaction'));
     }
 
-    // Update - Memperbarui data
+    // Memperbarui data transaksi
     public function update(Request $request, Transaction $transaction)
     {
-        // Pastikan hanya pemilik transaksi yang bisa memperbarui
         if ($transaction->user_id !== auth()->id()) {
             abort(403, 'Anda tidak memiliki akses untuk memperbarui transaksi ini.');
         }
@@ -182,20 +179,19 @@ class TransactionController extends Controller
                 $kuantitasDijualBaru = $item['jumlah'];
                 $jenisPenjualanBaru = $item['jenis_penjualan'];
                 $hargaPerUnitFinalBaru = 0;
-                $stokYangDikurangiBaru = 0; // Inisialisasi
+                $stokYangDikurangiBaru = 0;
 
-                // Penentuan Harga dan Pengurangan Stok untuk item BARU/DIUBAH
                 if ($jenisPenjualanBaru === 'satuan') {
                     $hargaPerUnitFinalBaru = $product->harga_satuan;
                     $stokYangDikurangiBaru = $kuantitasDijualBaru;
                 } elseif ($jenisPenjualanBaru === 'eceran') {
-                    if (!$product->bisa_atau_tdk_diecer) { // Cukup cek bisa_atau_tdk_diecer, tidak perlu unit_eceran
+                    if (!$product->bisa_atau_tdk_diecer) {
                         throw ValidationException::withMessages([
                             'products.*.jenis_penjualan' => "Produk '{$product->nama_produk}' tidak bisa dijual eceran."
                         ]);
                     }
                     $hargaPerUnitFinalBaru = $product->harga_eceran_per_unit;
-                    $stokYangDikurangiBaru = 0; // Stok tidak dikurangi untuk penjualan eceran BARU
+                    $stokYangDikurangiBaru = 0;
                 } else {
                     throw ValidationException::withMessages([
                         'products.*.jenis_penjualan' => "Jenis penjualan tidak valid untuk produk '{$product->nama_produk}'."
@@ -209,35 +205,22 @@ class TransactionController extends Controller
                 $existingDetail = $existingDetails->get($detailId);
 
                 if ($existingDetail) {
-                    // --- Logika Update Item yang Sudah Ada ---
-                    $stokYangDikembalikanLama = 0;
-
-                    // Dapatkan stok yang seharusnya dikembalikan dari detail lama
-                    if ($existingDetail->jenis_penjualan === 'satuan') {
-                        $stokYangDikembalikanLama = $existingDetail->jumlah;
-                    } elseif ($existingDetail->jenis_penjualan === 'eceran') {
-                        // Jika jenis penjualan lama adalah eceran, dan kita tidak mengurangi stok untuk eceran,
-                        // maka tidak ada stok yang perlu dikembalikan.
-                        $stokYangDikembalikanLama = 0; // <--- Perubahan di sini untuk konsistensi eceran
-                    }
-
-                    // Kembalikan stok lama ke produk (jika ada)
+                    // Kembalikan stok lama jika jenis penjualan sebelumnya satuan
+                    $stokYangDikembalikanLama = $existingDetail->jenis_penjualan === 'satuan' ? $existingDetail->jumlah : 0;
                     if ($stokYangDikembalikanLama > 0) {
                         $product->increment('stok', $stokYangDikembalikanLama);
                     }
 
-                    // Cek stok baru setelah dikembalikan
+                    // Cek stok baru
                     if ($stokYangDikurangiBaru > 0 && $product->stok < $stokYangDikurangiBaru) {
                         throw ValidationException::withMessages([
                             'products.*.jumlah' => "Stok tidak cukup untuk update produk '{$product->nama_produk}'. Stok tersedia: {$product->stok} (satuan)."
                         ]);
                     }
-                    // Kurangi stok dengan jumlah baru (jika $stokYangDikurangiBaru > 0)
                     if ($stokYangDikurangiBaru > 0) {
                         $product->decrement('stok', $stokYangDikurangiBaru);
                     }
 
-                    // Update detail transaksi
                     $existingDetail->update([
                         'product_id' => $item['product_id'],
                         'jumlah' => $kuantitasDijualBaru,
@@ -248,7 +231,6 @@ class TransactionController extends Controller
                     $updatedDetailIds[] = $existingDetail->id;
 
                 } else {
-                    // --- Logika Tambah Item Baru ---
                     if ($stokYangDikurangiBaru > 0 && $product->stok < $stokYangDikurangiBaru) {
                         throw ValidationException::withMessages([
                             'products.*.jumlah' => "Stok tidak cukup untuk produk baru '{$product->nama_produk}'. Stok tersedia: {$product->stok} (satuan)."
@@ -274,13 +256,7 @@ class TransactionController extends Controller
             foreach ($detailsToDelete as $detail) {
                 $product = Products::find($detail->product_id);
                 if ($product) {
-                    $stokYangDikembalikan = 0;
-                    if ($detail->jenis_penjualan === 'satuan') {
-                        $stokYangDikembalikan = $detail->jumlah;
-                    } elseif ($detail->jenis_penjualan === 'eceran') {
-                        // Jika detail yang dihapus adalah eceran, tidak ada stok yang dikembalikan
-                        $stokYangDikembalikan = 0; // <--- Perubahan di sini untuk konsistensi eceran
-                    }
+                    $stokYangDikembalikan = $detail->jenis_penjualan === 'satuan' ? $detail->jumlah : 0;
                     if ($stokYangDikembalikan > 0) {
                         $product->increment('stok', $stokYangDikembalikan);
                     }
@@ -288,12 +264,11 @@ class TransactionController extends Controller
                 $detail->delete();
             }
 
-            // Update total transaksi utama
+            // Update transaksi utama
             $transaction->update([
                 'total_transaksi' => $totalTransaksiKeseluruhan,
                 'tanggal_transaksi' => $request->tanggal_transaksi,
                 'pelanggan' => $request->pelanggan,
-                // user_id tidak diupdate karena hanya dibuat saat store
             ]);
 
             DB::commit();
@@ -309,10 +284,9 @@ class TransactionController extends Controller
         }
     }
 
-    // Destroy - Menghapus data
+    // Menghapus transaksi dan mengembalikan stok
     public function destroy(Transaction $transaction)
     {
-        // Pastikan hanya pemilik transaksi yang bisa menghapus
         if ($transaction->user_id !== auth()->id()) {
             abort(403, 'Anda tidak memiliki akses untuk menghapus transaksi ini.');
         }
@@ -320,24 +294,17 @@ class TransactionController extends Controller
         try {
             DB::beginTransaction();
 
-            // Sebelum menghapus transaksi dan detailnya, kembalikan stok produk
             foreach ($transaction->details as $detail) {
                 $product = Products::find($detail->product_id);
                 if ($product) {
-                    $stokYangDikembalikan = 0;
-                    if ($detail->jenis_penjualan === 'satuan') {
-                        $stokYangDikembalikan = $detail->jumlah;
-                    } elseif ($detail->jenis_penjualan === 'eceran') {
-                        // Jika jenis penjualan adalah eceran, tidak ada stok yang dikembalikan ke produk utama
-                        $stokYangDikembalikan = 0; // <--- Perubahan di sini untuk konsistensi eceran
-                    }
+                    $stokYangDikembalikan = $detail->jenis_penjualan === 'satuan' ? $detail->jumlah : 0;
                     if ($stokYangDikembalikan > 0) {
                         $product->increment('stok', $stokYangDikembalikan);
                     }
                 }
             }
 
-            $transaction->delete(); // Hapus transaksi beserta detailnya (jika ada cascade delete di DB atau model)
+            $transaction->delete();
 
             DB::commit();
             return redirect()->route('transactions.index')->with('success', 'Transaksi berhasil dihapus dan stok dikembalikan!');
@@ -348,12 +315,12 @@ class TransactionController extends Controller
         }
     }
 
+    // Pencarian transaksi milik user
     public function search(Request $request): View
     {
         $searchValue = trim($request->search ?? '');
 
-        // Hanya mencari transaksi yang dibuat oleh pengguna yang sedang login
-        $transactions = Transaction::where('user_id', auth()->id()) // <-- Perubahan penting di sini
+        $transactions = Transaction::where('user_id', auth()->id())
             ->with(['user', 'details.product'])
             ->when(!empty($searchValue), function ($query) use ($searchValue) {
                 if (ctype_digit($searchValue)) {

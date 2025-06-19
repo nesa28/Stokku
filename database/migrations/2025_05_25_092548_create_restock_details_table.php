@@ -6,9 +6,7 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
+    // Tabel 'restock_details': Menyimpan detail produk pada setiap restock
     public function up(): void
     {
         Schema::create('restock_details', function (Blueprint $table) {

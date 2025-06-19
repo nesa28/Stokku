@@ -7,13 +7,15 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+// Model untuk data restock barang
 class Restock extends Model
 {
     use HasFactory;
-    //Mendefinisikan nama tabel
+
+    // Mendefinisikan nama tabel
     protected $table = 'restock';
 
-    //mendefinisikan kolom-kolom yang boleh diisi secara massal
+    // Kolom yang boleh diisi secara massal
     protected $fillable = [
         'total_harga_beli',
         'tanggal_restock',
@@ -21,18 +23,19 @@ class Restock extends Model
         'user_id',
     ];
 
-   protected $casts = [
+    // Tipe data kolom
+    protected $casts = [
         'total_harga_beli' => 'decimal:2',
         'tanggal_restock' => 'date',
     ];
 
-    // mendefinisikan relasi banyak ke satu(BelongsTo)
+    // Relasi ke user (setiap restock dilakukan oleh satu user)
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    // Relasi ke detail restock
+    // Relasi ke detail restock (satu restock memiliki banyak detail)
     public function details(): HasMany
     {
         return $this->hasMany(RestockDetail::class, 'restock_id', 'id');

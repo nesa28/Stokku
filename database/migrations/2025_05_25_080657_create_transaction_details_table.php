@@ -8,9 +8,7 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
+    // Tabel 'restock_details': Menyimpan detail produk pada setiap transaksi 
     public function up(): void
     {
         Schema::create('transaction_details', function (Blueprint $table) {
@@ -22,7 +20,6 @@ return new class extends Migration
             $table->decimal('harga_per_unit', 10, 2);
             $table->decimal('subtotal', 12, 2);
             $table->timestamps();
-
             $table->index(['transaction_id', 'product_id']);
         });
     }
