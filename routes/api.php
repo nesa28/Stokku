@@ -3,16 +3,18 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProductsController;
+use App\Http\Controllers\API\AuthController;
 
+//AUTHENTICATION ROUTES
 // Create account
-Route::post('/register', [ProductsController::class, 'addAccount']);
+Route::post('/register', [AuthController::class, 'register']);
 
 // Login
-Route::post('/login', [ProductsController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login']);
 
-
-
-Route::put('/edit/{id}', [ProductsController::class, 'edit']);
-
-
-Route::delete('/delete/{id}', [ProductsController::class, 'delete']);
+Route::middleware('auth:api')->group(function () {
+    // Logout
+    Route::post('/logout', [AuthController::class, 'logout']);
+    // Get user profile
+    Route::get('/profile', [AuthController::class, 'profile']);
+});

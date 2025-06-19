@@ -4,16 +4,79 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Products;
-use Illuminate\View\View; // Digunakan untuk method yang mengembalikan view
-
+use App\Models\Activity;
+use Illuminate\View\View;
+use Illuminate\Support\Facades\Auth;
 
 class ProductsController extends Controller
 {
-    // Index - Menampilkan semua data
-    public function index(): View
+
+    private function recordActivity($type, $product, $description = null)
     {
-        $products = Products::lastest()-> paginate(20); // diurutkan berdasarkan yang terbaru, dan paginate 20 per halaman
-        return view('products.index', compact('products'));
+        Activity::create([
+            'type' => $type,
+            'description' => $description ?? ucfirst($type) . ' product: ' . $product->nama_produk,
+            'model_type' => 'Product',
+            'model_id' => $product->id,
+            'user_id' => Auth::id(),
+            'details' => [
+                'product_name' => $product->nama_produk,
+                'action' => $type,
+                'timestamp' => now()
+            ]
+        ]);
+    }
+
+    public function index(Request $request): View
+    {
+        $eceranFilter = $request->input('eceran_filter');
+        $searchValue = trim($request->input('search') ?? '');
+        $sortBy = $request->input('sort_by', 'latest'); // Ambil parameter sort_by, default 'latest'
+
+        $products = Products::where('user_id', auth()->id()) // Filter kepemilikan user
+            ->when(!empty($searchValue), function ($query) use ($searchValue) {
+                if (ctype_digit($searchValue)) {
+                    $query->where('id', (int) $searchValue);
+                } else {
+                    $query->where('nama_produk', 'ILIKE', '%' . $searchValue . '%');
+                }
+            })
+            ->when($eceranFilter !== null && $eceranFilter !== '', function ($query) use ($eceranFilter) {
+                $query->where('bisa_atau_tdk_diecer', (bool) $eceranFilter);
+            });
+
+        // Apply sorting logic
+        switch ($sortBy) {
+            case 'oldest':
+                $products->orderBy('created_at', 'asc');
+                break;
+            case 'id_asc':
+                $products->orderBy('id', 'asc');
+                break;
+            case 'id_desc':
+                $products->orderBy('id', 'desc');
+                break;
+            case 'name_asc':
+                $products->orderBy('nama_produk', 'asc');
+                break;
+            case 'name_desc':
+                $products->orderBy('nama_produk', 'desc');
+                break;
+            case 'stock_asc':
+                $products->orderBy('stok', 'asc');
+                break;
+            case 'stock_desc':
+                $products->orderBy('stok', 'desc');
+                break;
+            case 'latest': // Default
+            default:
+                $products->orderBy('created_at', 'desc');
+                break;
+        }
+
+        $products = $products->paginate(20); // Gunakan pagination
+
+        return view('products.index', compact('products')); // Sesuaikan dengan nama view Anda
     }
 
     // Create - Menampilkan form tambah data
@@ -25,7 +88,7 @@ class ProductsController extends Controller
     // Store - Menyimpan data baru
     public function store(Request $request)
     {
-        $request->validate([
+        $validatedData = $request->validate([
             'nama_produk' => 'required', // memastikan tidak kosong
             'satuan' => 'required',
             'stok'=> 'required|integer|min:0',
@@ -36,59 +99,72 @@ class ProductsController extends Controller
         ]);
 
         // Cara 1: Eloquent create
-        $products = Products::create($request->all()); // buat keamanan pake request aja
+        $products = Products::create($request->all());
 
-        return redirect()->route('products')
+        // Record activity
+        $this->recordActivity('create', $product);
+
+        return redirect()->route('products.index')
             ->with('success', 'Produk berhasil ditambahkan!');
     }
 
-     //Menampilkan detail produk tertentu.
-     public function show(Products $products): View
+    //Menampilkan detail produk tertentu.
+    public function show(Products $products): View
     {
         return view('products.show', compact('product'));
     }
 
     // Edit - Menampilkan form edit
-    public function edit($id): View
+    public function edit(Products $product): View
     {
-        $products = Products::find($id);
-        return view('product.edit', compact('products'));
+        if ($product->user_id !== auth()->id()) {
+            abort(403); // Forbidden access
+        }
+        return view('products.edit', compact('product'));
     }
 
     // Update - Memperbarui data
-    public function update(Request $request, $id)
+    public function update(Request $request, Products $product)
     {
-        $request->validate([
+        // Authorize: ensure only the owner can update
+        if ($product->user_id !== auth()->id()) {
+            abort(403); // Forbidden access
+        }
+
+        $validatedData = $request->validate([
             'nama_produk' => 'required',
             'satuan' => 'required',
-            'stok'=> 'required|integer|min:0',
-            'harga_satuan'=> 'required',
-            'bisa_atau_tdk_diecer'=> 'boolean',
-            'unit_eceran'=> 'nullable',
-            'harga_eceran_per_unit'=> 'nullable',
+            'stok' => 'required|integer|min:0',
+            'harga_satuan' => 'required',
+            'bisa_atau_tdk_diecer' => 'boolean',
+            'unit_eceran' => 'nullable',
+            'harga_eceran_per_unit' => 'nullable',
         ]);
 
-        $update = [
-            'nama_produk' => $request->nama_produk,
-            'satuan' => $request->satuan,
-            'stok'=> $request->stok,
-            'harga_satuan'=> $request->harga_satuan,
-            'bisa_atau_tdk_diecer'=> $request->bisa_atau_tdk_diecer,
-            'unit_eceran'=> $request->unit_eceran,
-            'harga_eceran_per_unit'=>$request->harga_eceran_per_unit,
-        ];
+        $product->update($validatedData);
 
-        Products::whereId($id)->update($update);
-        return redirect()->route('products')
+        // Record activity
+        $this->recordActivity('update', $product);
+
+        return redirect()->route('products.index')
             ->with('success', 'Produk berhasil diupdate!');
     }
 
     // Destroy - Menghapus data
-    public function destroy($id)
+    public function destroy(Products $product)
     {
-        $products = Products::find($id);
-        $products->delete();
-        return redirect()->route('products')
+        // Authorize: ensure only the owner can delete
+        if ($product->user_id !== auth()->id()) {
+            abort(403); // Forbidden access
+        }
+        $product->delete();
+
+        return redirect()->route('products.index')
             ->with('success', 'Produk berhasil dihapus');
+    }
+
+    public function search(Request $request): View
+    {
+        return $this->index($request); // Cukup panggil metode index untuk DRY (Don't Repeat Yourself)
     }
 }

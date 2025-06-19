@@ -21,6 +21,7 @@ class Products extends Model
         'bisa_atau_tdk_diecer',
         'unit_eceran',
         'harga_eceran_per_unit',
+        'user_id', // Menambahkan user_id untuk relasi dengan pengguna
     ];
 
     protected $casts = [
@@ -39,7 +40,7 @@ class Products extends Model
     }
 
     // Hubungan (relationship) dengan detail restock (satu produk bisa ada di banyak detail restock)
-    public function restockDetails(): HasMany 
+    public function restockDetails(): HasMany
     {
         return $this->hasMany(RestockDetail::class, 'product_id', 'id');
         // 'RestockDetail::class' adalah model untuk detail restock
