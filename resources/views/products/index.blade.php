@@ -12,7 +12,7 @@
                     <div class="flex items-center justify-between mb-6">
                         <h1 class="text-xl font-bold text-slate-700">Daftar Stok Produk</h1>
                         <a href="{{ route('products.create') }}"
-                            class="mb-4 inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
+                            class="mb-4 inline-block bg-blue-600 hover:bg-blue-700 text-slate-700 text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
                             + Tambah Produk
                         </a>
                     </div>
@@ -20,7 +20,7 @@
                     <div class="mb-6">
                         <form action="{{ route('products.search') }}" method="GET" class="mb-6 flex items-center space-x-3">
                             <input type="text" name="search" value="{{ request('search') }}"
-                                   placeholder="Cari berdasarkan ID Produk atau Nama Produk..."
+                                   placeholder="Cari berdasarkan Kode Produk atau Nama Produk..."
                                    class="border border-gray-300 rounded-lg px-4 py-2 text-sm max-w-xs focus:outline-none focus:ring-2 focus:ring-blue-400">
 
                             {{-- Eceran Filter Dropdown --}}
@@ -36,8 +36,8 @@
                                     class="border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
                                 <option value="latest" {{ request('sort_by') === 'latest' ? 'selected' : '' }}>Terbaru (Default)</option>
                                 <option value="oldest" {{ request('sort_by') === 'oldest' ? 'selected' : '' }}>Terlama</option>
-                                <option value="id_asc" {{ request('sort_by') === 'id_asc' ? 'selected' : '' }}>ID Terkecil</option>
-                                <option value="id_desc" {{ request('sort_by') === 'id_desc' ? 'selected' : '' }}>ID Terbesar</option>
+                                <option value="code_asc" {{ request('sort_by') === 'code_asc' ? 'selected' : '' }}>Kode Terkecil</option>
+                                <option value="code_desc" {{ request('sort_by') === 'code_desc' ? 'selected' : '' }}>Kode Terbesar</option>
                                 <option value="name_asc" {{ request('sort_by') === 'name_asc' ? 'selected' : '' }}>Nama (A-Z)</option>
                                 <option value="name_desc" {{ request('sort_by') === 'name_desc' ? 'selected' : '' }}>Nama (Z-A)</option>
                                 <option value="stock_asc" {{ request('sort_by') === 'stock_asc' ? 'selected' : '' }}>Stok Terkecil</option>
@@ -45,12 +45,12 @@
                             </select>
 
                             <button type="submit"
-                                    class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
+                                    class="bg-blue-600 hover:bg-blue-700 text-slate-700 text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
                                 Filter & Urutkan
                             </button>
                             @if(request('search') || request('eceran_filter') || request('sort_by'))
                                 <a href="{{ route('products.index') }}"
-                                   class="bg-gray-500 hover:bg-gray-600 text-white text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
+                                   class="bg-gray-500 hover:bg-gray-600 text-slate-700 text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
                                     Reset
                                 </a>
                             @endif
@@ -61,7 +61,7 @@
                         <table class="min-w-full text-left text-sm border-collapse border border-gray-200">
                             <thead class="bg-gray-100 text-slate-700 font-semibold">
                                 <tr>
-                                    <th class="px-4 py-2 border-b">ID</th>
+                                    <th class="px-4 py-2 border-b">Kode Produk</th>
                                     <th class="px-4 py-2 border-b">Nama Produk</th>
                                     <th class="px-4 py-2 border-b">Satuan</th>
                                     <th class="px-4 py-2 border-b">Stok</th>
@@ -75,7 +75,7 @@
                             <tbody>
                                 @forelse($products as $produk)
                                     <tr class="hover:bg-gray-50">
-                                        <td class="px-4 py-2 border-b">{{ $produk->id }}</td>
+                                        <td class="px-4 py-2 border-b">{{ $produk->user_product_code }}</td>
                                         <td class="px-4 py-2 border-b">{{ $produk->nama_produk }}</td>
                                         <td class="px-4 py-2 border-b">{{ $produk->satuan }}</td>
                                         <td class="px-4 py-2 border-b">{{ $produk->stok }}</td>

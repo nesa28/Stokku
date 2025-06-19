@@ -52,11 +52,11 @@ class ProductsController extends Controller
             case 'oldest':
                 $products->orderBy('created_at', 'asc');
                 break;
-            case 'id_asc':
-                $products->orderBy('id', 'asc');
+            case 'code_asc':
+                $products->orderBy('user_product_code', 'asc');
                 break;
-            case 'id_desc':
-                $products->orderBy('id', 'desc');
+            case 'code_desc':
+                $products->orderBy('user_product_code', 'desc');
                 break;
             case 'name_asc':
                 $products->orderBy('nama_produk', 'asc');
@@ -93,21 +93,33 @@ class ProductsController extends Controller
         $validatedData = $request->validate([
             'nama_produk' => 'required',
             'satuan' => 'required',
-            'stok'=> 'required|integer|min:0',
-            'harga_satuan'=> 'required',
-            'bisa_atau_tdk_diecer'=> 'boolean',
-            'unit_eceran'=> 'nullable',
-            'harga_eceran_per_unit'=> 'nullable',
+            'stok' => 'required|integer|min:0',
+            'harga_satuan' => 'required',
+            'bisa_atau_tdk_diecer' => 'boolean',
+
+            'unit_eceran' => 'nullable|min:1',
+            'harga_eceran_per_unit' => 'nullable|min:0',
         ]);
 
-        $products = Products::create($request->all());
+        $userId = Auth::id();
 
-        // Catat aktivitas create
-        $this->recordActivity('create', $products);
+        // --- Generate user_product_code ---
+        // Find the highest user_product_code for the current user
+        $lastUserProductCode = Products::where('user_id', $userId)->max('user_product_code');
+        // The new code will be the last one + 1, or 1 if it's the first product for this user
+        $newUserProductCode = ($lastUserProductCode ?? 0) + 1;
+        // --- End Generate user_product_code ---
 
-        return redirect()->route('products.index')
-            ->with('success', 'Produk berhasil ditambahkan!');
+        $product = Products::create(array_merge($validatedData, [
+            'user_id' => $userId,
+            'user_product_code' => $newUserProductCode, // <-- Add this
+        ]));
+
+        $this->recordActivity('create', $product);
+
+        return redirect()->route('products.index')->with('success', 'Produk berhasil ditambahkan!');
     }
+
 
     // Menampilkan detail produk tertentu
     public function show(Products $products): View

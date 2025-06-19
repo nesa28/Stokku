@@ -22,6 +22,7 @@ class Products extends Model
         'unit_eceran',
         'harga_eceran_per_unit',
         'user_id', // Menambahkan user_id untuk relasi dengan pengguna
+        'user_product_code', // Menambahkan user_product_code untuk produk unik per pengguna
     ];
 
     protected $casts = [

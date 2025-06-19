@@ -5,22 +5,56 @@ namespace App\Http\Controllers;
 use App\Models\Products;
 use App\Models\Transaction;
 use App\Models\TransactionDetail;
+use App\Models\Activity; // Import the Activity model
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Auth; // Import Auth facade
 
 // Controller untuk manajemen transaksi penjualan
 class TransactionController extends Controller
 {
     // Menampilkan daftar transaksi milik user
-    public function index()
+    public function index(Request $request): View // Accept Request to get sort_by parameter
     {
-        $transactions = Transaction::where('user_id', auth()->id())
+        $searchValue = trim($request->input('search') ?? '');
+        $sortBy = $request->input('sort_by', 'latest'); // Default sort to 'latest'
+
+        $transactions = Transaction::where('user_id', Auth::id())
             ->with(['details.product'])
-            ->latest()
-            ->paginate(10);
+            ->when(!empty($searchValue), function ($query) use ($searchValue) {
+                if (ctype_digit($searchValue)) {
+                    $query->where('id', (int) $searchValue);
+                } else {
+                    $query->orWhereHas('user', function ($q) use ($searchValue) {
+                        $q->where('name', 'ILIKE', '%' . $searchValue . '%');
+                    });
+                    $query->orWhereHas('details.product', function ($q) use ($searchValue) {
+                        $q->where('nama_produk', 'ILIKE', '%' . $searchValue . '%');
+                    });
+                }
+            });
+
+        // Apply sorting logic
+        switch ($sortBy) {
+            case 'oldest':
+                $transactions->orderBy('created_at', 'asc');
+                break;
+            case 'id_asc':
+                $transactions->orderBy('id', 'asc');
+                break;
+            case 'id_desc':
+                $transactions->orderBy('id', 'desc');
+                break;
+            case 'latest': // Default
+            default:
+                $transactions->orderBy('created_at', 'desc');
+                break;
+        }
+
+        $transactions = $transactions->paginate(10); // Apply pagination after all filters/sorts
 
         return view('transactions.index', compact('transactions'));
     }
@@ -28,7 +62,7 @@ class TransactionController extends Controller
     // Menampilkan form tambah transaksi
     public function create(): View
     {
-        $products = Products::all();
+        $products = Products::where('user_id', Auth::id())->get();
         return view('transactions.create', compact('products'));
     }
 
@@ -77,7 +111,7 @@ class TransactionController extends Controller
                         ]);
                     }
                     $hargaPerUnitFinal = $product->harga_eceran_per_unit;
-                    $stokYangDikurangi = 0;
+                    $stokYangDikurangi = 0; // Stok tidak dikurangi untuk penjualan eceran
                 } else {
                     throw ValidationException::withMessages([
                         "products.{$index}.jenis_penjualan" => "Jenis penjualan tidak valid untuk produk '{$product->nama_produk}'."
@@ -111,10 +145,14 @@ class TransactionController extends Controller
                 'total_transaksi' => $totalTransaksiKeseluruhan,
                 'tanggal_transaksi' => $request->tanggal_transaksi,
                 'pelanggan' => $request->pelanggan,
-                'user_id' => auth()->id(),
+                'user_id' => Auth::id(), // Ensure consistency with Auth::id()
             ]);
 
             $transaction->details()->createMany($transactionDetailsData);
+
+            // --- Record Activity: Create Transaction ---
+            $this->recordActivity('create', $transaction);
+            // --- End Record Activity ---
 
             DB::commit();
 
@@ -129,10 +167,19 @@ class TransactionController extends Controller
         }
     }
 
+    public function edit(Transaction $transaction): View
+    {
+        if ($transaction->user_id !== auth()->id()) {
+            abort(403);
+        }
+        $products = Products::all(); // Fetches all products for the dropdowns
+        return view('transactions.edit', compact('transaction', 'products'));
+    }
+
     // Menampilkan detail transaksi tertentu
     public function show(Transaction $transaction)
     {
-        if ($transaction->user_id !== auth()->id()) {
+        if ($transaction->user_id !== Auth::id()) { // Ensure consistency with Auth::id()
             abort(403, 'Anda tidak memiliki akses untuk melihat transaksi ini.');
         }
         $transaction->load('details.product');
@@ -142,7 +189,7 @@ class TransactionController extends Controller
     // Memperbarui data transaksi
     public function update(Request $request, Transaction $transaction)
     {
-        if ($transaction->user_id !== auth()->id()) {
+        if ($transaction->user_id !== Auth::id()) { // Ensure consistency with Auth::id()
             abort(403, 'Anda tidak memiliki akses untuk memperbarui transaksi ini.');
         }
 
@@ -167,12 +214,12 @@ class TransactionController extends Controller
 
             $existingDetails = $transaction->details->keyBy('id');
 
-            foreach ($request->products as $item) {
+            foreach ($request->products as $index => $item) { // Added $index for error mapping
                 $product = $productsFromDb->get($item['product_id']);
 
                 if (!$product) {
                     throw ValidationException::withMessages([
-                        'products.*.product_id' => "Produk dengan ID {$item['product_id']} tidak ditemukan."
+                        "products.{$index}.product_id" => "Produk dengan ID {$item['product_id']} tidak ditemukan."
                     ]);
                 }
 
@@ -187,14 +234,14 @@ class TransactionController extends Controller
                 } elseif ($jenisPenjualanBaru === 'eceran') {
                     if (!$product->bisa_atau_tdk_diecer) {
                         throw ValidationException::withMessages([
-                            'products.*.jenis_penjualan' => "Produk '{$product->nama_produk}' tidak bisa dijual eceran."
+                            "products.{$index}.jenis_penjualan" => "Produk '{$product->nama_produk}' tidak bisa dijual eceran."
                         ]);
                     }
                     $hargaPerUnitFinalBaru = $product->harga_eceran_per_unit;
                     $stokYangDikurangiBaru = 0;
                 } else {
                     throw ValidationException::withMessages([
-                        'products.*.jenis_penjualan' => "Jenis penjualan tidak valid untuk produk '{$product->nama_produk}'."
+                        "products.{$index}.jenis_penjualan" => "Jenis penjualan tidak valid untuk produk '{$product->nama_produk}'."
                     ]);
                 }
 
@@ -205,20 +252,23 @@ class TransactionController extends Controller
                 $existingDetail = $existingDetails->get($detailId);
 
                 if ($existingDetail) {
-                    // Kembalikan stok lama jika jenis penjualan sebelumnya satuan
+                    // Calculate stock adjustment needed for existing item
                     $stokYangDikembalikanLama = $existingDetail->jenis_penjualan === 'satuan' ? $existingDetail->jumlah : 0;
+                    $stokYangDikeluarkanBaru = $stokYangDikurangiBaru; // This is the new deduction based on new item type/qty
+
+                    // First, return the old stock (if any was deducted)
                     if ($stokYangDikembalikanLama > 0) {
                         $product->increment('stok', $stokYangDikembalikanLama);
                     }
 
-                    // Cek stok baru
-                    if ($stokYangDikurangiBaru > 0 && $product->stok < $stokYangDikurangiBaru) {
-                        throw ValidationException::withMessages([
-                            'products.*.jumlah' => "Stok tidak cukup untuk update produk '{$product->nama_produk}'. Stok tersedia: {$product->stok} (satuan)."
-                        ]);
-                    }
-                    if ($stokYangDikurangiBaru > 0) {
-                        $product->decrement('stok', $stokYangDikurangiBaru);
+                    // Then, check and deduct the new stock
+                    if ($stokYangDikeluarkanBaru > 0) {
+                        if ($product->stok < $stokYangDikeluarkanBaru) {
+                            throw ValidationException::withMessages([
+                                "products.{$index}.jumlah" => "Stok tidak cukup untuk update produk '{$product->nama_produk}'. Stok tersedia: {$product->stok} (satuan)."
+                            ]);
+                        }
+                        $product->decrement('stok', $stokYangDikeluarkanBaru);
                     }
 
                     $existingDetail->update([
@@ -231,12 +281,13 @@ class TransactionController extends Controller
                     $updatedDetailIds[] = $existingDetail->id;
 
                 } else {
-                    if ($stokYangDikurangiBaru > 0 && $product->stok < $stokYangDikurangiBaru) {
-                        throw ValidationException::withMessages([
-                            'products.*.jumlah' => "Stok tidak cukup untuk produk baru '{$product->nama_produk}'. Stok tersedia: {$product->stok} (satuan)."
-                        ]);
-                    }
+                    // Tambah item baru
                     if ($stokYangDikurangiBaru > 0) {
+                        if ($product->stok < $stokYangDikurangiBaru) {
+                            throw ValidationException::withMessages([
+                                "products.{$index}.jumlah" => "Stok tidak cukup untuk produk baru '{$product->nama_produk}'. Stok tersedia: {$product->stok} (satuan)."
+                            ]);
+                        }
                         $product->decrement('stok', $stokYangDikurangiBaru);
                     }
 
@@ -271,6 +322,10 @@ class TransactionController extends Controller
                 'pelanggan' => $request->pelanggan,
             ]);
 
+            // --- Record Activity: Update Transaction ---
+            $this->recordActivity('update', $transaction);
+            // --- End Record Activity ---
+
             DB::commit();
 
             return redirect()->route('transactions.index')->with('success', 'Transaksi berhasil diperbarui!');
@@ -287,16 +342,18 @@ class TransactionController extends Controller
     // Menghapus transaksi dan mengembalikan stok
     public function destroy(Transaction $transaction)
     {
-        if ($transaction->user_id !== auth()->id()) {
+        if ($transaction->user_id !== Auth::id()) {
             abort(403, 'Anda tidak memiliki akses untuk menghapus transaksi ini.');
         }
 
         try {
             DB::beginTransaction();
 
+            // Loop through details to return stock before deletion
             foreach ($transaction->details as $detail) {
                 $product = Products::find($detail->product_id);
                 if ($product) {
+                    // Only return stock if it was a 'satuan' sale
                     $stokYangDikembalikan = $detail->jenis_penjualan === 'satuan' ? $detail->jumlah : 0;
                     if ($stokYangDikembalikan > 0) {
                         $product->increment('stok', $stokYangDikembalikan);
@@ -304,7 +361,14 @@ class TransactionController extends Controller
                 }
             }
 
-            $transaction->delete();
+            // Get ID before deletion for activity log
+            $transactionId = $transaction->id;
+
+            $transaction->delete(); // This will also delete details if cascade is set up in migration or model
+
+            // --- Record Activity: Delete Transaction ---
+            $this->recordActivity('delete', $transaction, 'Deleted Transaction: ID ' . $transactionId);
+            // --- End Record Activity ---
 
             DB::commit();
             return redirect()->route('transactions.index')->with('success', 'Transaksi berhasil dihapus dan stok dikembalikan!');
@@ -318,25 +382,32 @@ class TransactionController extends Controller
     // Pencarian transaksi milik user
     public function search(Request $request): View
     {
-        $searchValue = trim($request->search ?? '');
+        return $this->index($request);
+    }
 
-        $transactions = Transaction::where('user_id', auth()->id())
-            ->with(['user', 'details.product'])
-            ->when(!empty($searchValue), function ($query) use ($searchValue) {
-                if (ctype_digit($searchValue)) {
-                    $query->where('id', (int) $searchValue);
-                } else {
-                    $query->orWhereHas('user', function ($q) use ($searchValue) {
-                        $q->where('name', 'ILIKE', '%' . $searchValue . '%');
-                    });
-                    $query->orWhereHas('details.product', function ($q) use ($searchValue) {
-                        $q->where('nama_produk', 'ILIKE', '%' . $searchValue . '%');
-                    });
-                }
-            })
-            ->latest()
-            ->paginate(10);
+    // --- Private method to record activity for Transactions ---
+    private function recordActivity($type, $transaction, $description = null)
+    {
+        // Get the list of products involved for more detailed logging
+        $productNames = $transaction->details->map(function ($detail) {
+            return $detail->product->nama_produk . ' (' . $detail->jumlah . ' ' . $detail->jenis_penjualan . ')';
+        })->implode(', ');
 
-        return view('transactions.index', compact('transactions'));
+        Activity::create([
+            'type' => $type,
+            'description' => $description ?? ucfirst($type) . ' transaction: ID ' . $transaction->id . ' (Pelanggan: ' . ($transaction->pelanggan ?? 'Umum') . ') - Produk: ' . $productNames,
+            'model_type' => 'Transaction',
+            'model_id' => $transaction->id,
+            'user_id' => Auth::id(),
+            'details' => [
+                'transaction_id' => $transaction->id,
+                'total_transaksi' => $transaction->total_transaksi,
+                'tanggal_transaksi' => $transaction->tanggal_transaksi,
+                'pelanggan' => $transaction->pelanggan,
+                'products_involved' => $productNames,
+                'action' => $type,
+                'timestamp' => now()
+            ]
+        ]);
     }
 }

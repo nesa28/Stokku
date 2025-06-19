@@ -32,7 +32,7 @@
                         <select name="products[0][product_id]" required
                             class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400">
                             <option value="">Pilih Produk</option>
-                            @foreach($allproducts as $produk)
+                            @foreach($products as $produk)
                                 <option value="{{ $produk->id }}">{{ $produk->nama_produk }}</option>
                             @endforeach
                         </select>
@@ -41,7 +41,7 @@
                         <input type="number" name="products[0][harga_beli_per_unit]" placeholder="Harga Beli/Unit" min="0" required
                             class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400">
                         <button type="button"
-                            class="remove-produk bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
+                            class="remove-produk bg-red-600 hover:bg-red-700 text-slate-700 text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
                             Hapus
                         </button>
                     </div>
@@ -79,7 +79,7 @@
             <select name="products[${produkIndex}][product_id]" required
                 class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400">
                 <option value="">Pilih Produk</option>
-                @foreach($allproducts as $produk)
+                @foreach($products as $produk)
                     <option value="{{ $produk->id }}">{{ $produk->nama_produk }}</option>
                 @endforeach
             </select>
@@ -88,7 +88,7 @@
             <input type="number" name="products[${produkIndex}][harga_beli_per_unit]" placeholder="Harga Beli/Unit" min="0" required
                 class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400">
             <button type="button"
-                class="remove-produk bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
+                class="remove-produk bg-red-600 hover:bg-red-700 text-slate-700 text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
                 Hapus
             </button>
         `;

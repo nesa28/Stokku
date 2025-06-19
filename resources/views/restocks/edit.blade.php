@@ -49,7 +49,7 @@
                                     placeholder="Harga Beli/Unit" min="0" value="{{ $detail->harga_beli_per_unit }}" required
                                     class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400">
                                 <button type="button"
-                                    class="remove-produk bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
+                                    class="remove-produk bg-red-600 hover:bg-red-700 text-slate-700 text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
                                     Hapus
                                 </button>
                             </div>
@@ -63,7 +63,7 @@
 
                     <div class="flex gap-4">
                         <button type="submit"
-                            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-6 rounded-lg transition duration-200 ease-in-out">
+                            class="bg-blue-600 hover:bg-blue-700 text-slate-700 text-sm font-semibold py-2 px-6 rounded-lg transition duration-200 ease-in-out">
                             Simpan Perubahan
                         </button>
                         <a href="{{ route('restocks.index') }}"
@@ -97,7 +97,7 @@
                 <input type="number" name="products[${produkIndex}][harga_beli_per_unit]" placeholder="Harga Beli/Unit" min="0" required
                     class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400">
                 <button type="button"
-                    class="remove-produk bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
+                    class="remove-produk bg-red-600 hover:bg-red-700 text-slate-700 text-sm font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out">
                     Hapus
                 </button>
             `;
